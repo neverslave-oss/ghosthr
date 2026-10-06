@@ -46,9 +46,16 @@ Three capabilities, one extension:
 
 Don't build all three at once. Sequencing:
 
-- **Phase 1 — CV + job "hold back" scanner.** Fastest to ship, easiest to demo. *This is the MVP.*
-- **Phase 2 — Ghosting DB layer** on top of **jobibot** (extend it, don't build new). The moat (network effect), but slowest to populate. Reactive reporting + pre-apply lookups.
+- **Phase 1 (MVP) — standalone extension.** CV + job "hold back" scanner + **local application tracker** with a **local SQLite DB**. Runs fully standalone — no backend dependency — so it's testable the moment it loads. *This is the immediate priority.*
+- **Phase 2 — Ghosting DB layer** on top of **jobibot** (extend it, don't build new) reached via **explicit cloud sync**. The moat (network effect), but slowest to populate. Reactive reporting + pre-apply lookups.
 - **Phase 3 — "Ghost back" + score feedback loop.** One-click withdraw that feeds the employer's score.
+
+### Standalone-first principle (Fabio decision, 2026-10-06)
+The MVP is **not** extension-→-cloud. It's a local-first app inside the browser:
+- **CV stays on the user's machine**; only the parsed/scanned CV data is stored, in the **local SQLite DB**.
+- Candidates **track every application they submit** in the local DB (company, role, date, stage, notes, outcome).
+- The ghost DB (jobibot) is reached only through an **explicit, opt-in sync**: user chooses to sync, we **upsert the user + the relevant data**, and the user separately opts whether to **sync their CV into jobibot.com** or not.
+- **Priority: the browser extension works standalone so Fabio can test it immediately.** No cloud account, no backend required to use the core scanner + tracker.
 
 ### Target markets (Fabio decision)
 **Any job board with an ATS application form** — not just LinkedIn/Indeed. Most applications from known companies happen **outside LinkedIn**; their flow is near-identical (prefill a form from your CV, a few textareas, job description at top). Many run **Workable** or similar.
@@ -56,41 +63,57 @@ Example: `https://apply.workable.com/boardofinnovation/j/531B141B6C/`
 
 So the extension targets: **Workable + other common ATS form flows** first, then generic form detection as a fallback.
 
-## 5. Architecture (Phase 1 MVP)
+## 5. Architecture (Phase 1 MVP — standalone-first)
 
 **Stack decision (Fabio: "it's a chrome extension, pick the best fit"):**
-- **Extension frontend:** TypeScript + Vite, content script + MV3 service worker + React (or Preact) for the popup/side panel. Best fit for a Chromium extension (MV3, module bundling, typed against the DOM/ATS forms).
-- **Backend/DB:** **extend jobibot** (Laravel + existing MySQL/Postgres) as the API + central data store — it already has `Company`, `JobAdvertisement`, `Candidate`, `Feedback`. Add the ghosting layer there. Reuses auth, admin, and the company graph.
-- **AI:** multi-provider, **local-first → Hugging Face → Doubleword → OpenRouter** routing (matches our other services).
+- **Extension:** TypeScript + Vite, content script + MV3 service worker + a UI (React/Preact) for the popup/application tracker. Best fit for a Chromium extension (MV3, module bundling, typed against the DOM/ATS forms).
+- **Local storage:** **SQLite** inside the extension. Best-fit implementations for MV3 are WASM SQLite (e.g. `@sqlite.org/sqlite-wasm` / `sql.js`) or IndexedDB-backed storage; spec picks **WASM SQLite** for real SQL + easy outbox pattern. Everything works offline.
+- **Cloud (Phase 2+):** **extend jobibot** (Laravel) as the central API + DB — it already has `Company`, `JobAdvertisement`, `Candidate`, `Feedback`. Add the ghosting layer + a **sync endpoint** there.
+- **AI:** multi-provider, **local-first → Hugging Face → Doubleword → OpenRouter** routing. In standalone mode the AI call originates from the extension (through an optional lightweight relay keyed to the user) so even Phase 1 can use the providers directly.
 
 ```
-┌───────────────────────────── Chrome Extension (TS/Vite/MV3) ───────────────┐
+┌──────────────────────────── Chrome Extension (TS/Vite/MV3) ────────────────┐
 │  content script — ATS form detector + prefill (Workable + generic forms)   │
-│  popup / side panel (CV upload + verdict display)                          │
-│  MV3 service worker (calls jobibot API, auth, storage)                     │
-└──────────────────────────────────┬─────────────────────────────────────────┘
-                                   │ HTTPS
-                                   ▼
-┌────────────────────────────── Backend: jobibot (extended) ────────────────┐
-│  Laravel API routes                                                       │
-│   POST /api/ghost/jobs/analyze   (job text + CV → verdict)                │
-│   GET  /api/ghost/companies/{id}/ghost-score   (pre-apply gate)           │
-│   POST /api/ghost/reports         (crowdsourced report, Phase 2)          │
-│   POST /api/ghost/back            (withdraw event → updates score, P3)    │
-│  AI router: local-first → HF → doubleword → openrouter                     │
-│  Data: reuse jobibot tables + NEW ghost tables                             │
-│  Admin: existing jobibot admin + new review queue                         │
+│  popup / application tracker UI (local, offline)                            │
+│  ✓ LOCAL SQLite DB                                                          │
+│      • cv_profiles (parsed CV, local)                                       │
+│      • applications (tracked submissions: company/role/date/stage/notes)    │
+│      • analyses (verdicts), ghost signals                                   │
+│      • outbox (pending sync events)                                         │
+│  MV3 service worker                                                         │
+└───────────────────────────────┬─────────────────────────────────────────────┘
+        standalone = everything above, no backend                            │
+        optional sync = user opts in                                         │
+                                │ HTTPS (opt-in, Phase 2+)
+                                ▼
+┌─────────────────────────────── Backend: jobibot (extended) ───────────────┐
+│  POST /api/ghost/sync        upsert user + tracked apps + CV (opt-in)      │
+│  GET  /api/ghost/companies/{id}/ghost-score   (pre-apply gate)             │
+│  POST /api/ghost/reports     (crowdsourced report)                         │
+│  POST /api/ghost/back        (withdraw event → updates score, Phase 3)     │
+│  AI router (optional relay): local-first → HF → doubleword → openrouter     │
 └────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ### Data model
-**Reuse from jobibot:** `users`, `companies`, `job_advertisements`, `candidates`, `feedbacks`.
-**New tables (added to jobibot):**
-- `ghost_cv_profiles` — parsed CV snapshot per user (skills, years, education, projects)
-- `ghost_analyses` — verdict, hold-back actions, match score, reasoning
-- `ghost_reports` — per-company ghost incidents (status, stage, timestamps, proof)
-- `ghost_scores` — derived ghosting scores per company
-- `ghost_back_events` — withdraw/no-follow-up events (Phase 3)
+**Local (extension SQLite, Phase 1):**
+- `cv_profiles` — parsed CV snapshot per user (skills, years, education, projects) — **stays local**
+- `applications` — every submitted application: company, role, date, stage, notes, outcome
+- `analyses` — verdict, hold-back actions, match score, reasoning
+- `outbox` — pending sync events (created offline, flushed on sync)
+- `ghost_flags` — locally cached employer ghost signals
+
+**Cloud (jobibot, Phase 2+, reached only via opt-in sync):**
+- reuse `users`, `companies`, `job_advertisements`, `candidates`, `feedbacks`
+- add `ghost_cv_profiles`, `ghost_analyses`, `ghost_reports`, `ghost_scores`, `ghost_back_events`
+- add `sync_events` — outbox counterpart for idempotent upserts
+
+**Sync contract (opt-in):**
+1. User clicks "Sync" in the extension.
+2. Upsert the user (create-if-missing).
+3. Upsert tracked applications + their ghost-relevant signals.
+4. **Separate opt-in** to sync the CV into jobibot.com (default off).
+5. Idempotent (outbox has stable event ids), so re-sync never duplicates.
 
 ### The "hold back" AI prompt (the hard part)
 A generic "you're missing 3 keywords" is easy; "spend two weeks building X before applying" requires understanding the *specific* gap between the candidate's profile and the role's *actual* requirements — not just the posted ones.
@@ -121,10 +144,13 @@ Prompt contract → JSON:
 6. **Ghost-score fairness.** Companies can dispute; need an appeal path and to prevent weaponized downvoting (rate limits, verified application events).
 
 ## 7. Security & privacy stance
-- CVs and analyses processed with user consent; stored encrypted; user can delete.
-- Extension analyzes the job listing client-side first (and prefills the ATS form locally); only structured verdict round-trips to API.
-- No server-side page scraping; data minimization.
-- Ghost reports require a minimal proof signal (stage, dates, optional screenshot) and pass a review queue before affecting public score.
+- **CV files never leave the machine unless the user opts to sync them** into jobibot (default: CV stays local; only parsed CV data is in the local SQLite DB).
+- Local DB is user-owned; the extension offers export + full delete.
+- Outbox ensures sync is explicit, idempotent, and user-triggered.
+- Analyses: structured verdict only. No server-side page scraping.
+- Ghost reports (Phase 2) require a minimal proof signal (stage, dates, optional screenshot) and pass a review queue before affecting public score.
+
+**Standalone guarantee:** all Phase 1 features (scan, verdict, CV local storage, application tracking) function with **no network, no account, no backend**. Cloud features only light up after explicit sync consent.
 
 ## 8. Monetization (sketch, not committed)
 - Free: match score + ghost check + basic hold-back actions.
@@ -133,10 +159,11 @@ Prompt contract → JSON:
 
 ## 9. Decisions locked (Fabio, 2026-10-06)
 1. **Name:** **ghostHR**.
-2. **Markets:** any job board with an ATS application form (Workable + generic forms), not just LinkedIn/Indeed — most known-company applications happen outside LinkedIn.
-3. **Ghosting DB:** **reuse jobibot** as the central DB/backend; add a ghost layer rather than build a new one.
+2. **Markets:** any job board with an ATS application form (Workable + generic forms), not just LinkedIn/Indeed.
+3. **Ghosting DB:** **reuse jobibot** as the cloud DB/backend; add a ghost layer — reached only via opt-in sync.
 4. **AI providers:** **local-first → Hugging Face → Doubleword → OpenRouter**.
-5. **Stack:** it's a Chrome extension — **best-fit = TypeScript + Vite + MV3** for the extension; **extend jobibot (Laravel)** as the backend/DB.
+5. **Stack:** Chrome extension — **TypeScript + Vite + MV3**; **local SQLite** for standalone local-first; **extend jobibot (Laravel)** for the opt-in cloud layer.
+6. **Standalone-first (added):** the extension must work fully standalone (local SQLite, CV stays local, application tracker) so Fabio can test it immediately with no backend. Cloud sync is an explicit, later, opt-in feature.
 
 ## 10. Suggested next step
-Write the implementation plan (Phase 1 MVP) with micro-steps and tests: (a) scaffold the TS/Vite/MV3 extension with an ATS form detector + CV prefill for Workable, (b) add a `analyze` endpoint to jobibot routed across the AI providers, (c) eval harness for the hold-back verdict. All on a dedicated feature branch, test-first, per the tracker workflow.
+Write the implementation plan (Phase 1 MVP) with micro-steps and tests. **Priority: standalone extension first** — (a) scaffold TS/Vite/MV3 with local SQLite, (b) ATS form detector + CV parse/store locally + application tracker, (c) hold-back verdict routed across the AI providers, then (d) design the opt-in sync to jobibot. All on a dedicated feature branch, test-first, per the tracker workflow.
