@@ -37,7 +37,7 @@ async function handleMessage(msg: any): Promise<any> {
   if (!msg || typeof msg !== 'object' || typeof msg.type !== 'string') {
     return { ok: false, error: 'bad message' }
   }
-  const db = await openDb()
+  await openDb()
 
   switch (msg.type) {
     case 'GHOSTHR_SCAN_PAGE': {
@@ -47,7 +47,7 @@ async function handleMessage(msg: any): Promise<any> {
       if (!scan.jobDescription && !scan.fields.length) {
         return { ok: true, empty: true, scan }
       }
-      saveJobScan({
+      await saveJobScan({
         url: msg.url ?? '',
         title: scan.jobTitle,
         company: scan.company,
@@ -63,7 +63,7 @@ async function handleMessage(msg: any): Promise<any> {
       if (msg.imageDataUrl) input.imageDataUrl = msg.imageDataUrl
       if (msg.text) input.text = msg.text
       const cv: ParsedCv = await parseCv(input)
-      const id = upsertCvProfile(
+      const id = await upsertCvProfile(
         msg.name ?? 'cv',
         cv.raw_text ?? msg.text ?? '',
         JSON.stringify(cv),
@@ -72,16 +72,16 @@ async function handleMessage(msg: any): Promise<any> {
     }
 
     case 'GHOSTHR_ADD_APPLICATION': {
-      const id = addApplication(msg.application)
+      const id = await addApplication(msg.application)
       return { ok: true, id }
     }
 
     case 'GHOSTHR_LIST_APPLICATIONS': {
-      return { ok: true, applications: listApplications() }
+      return { ok: true, applications: await listApplications() }
     }
 
     case 'GHOSTHR_GET_CV': {
-      return { ok: true, cv: getLatestCvProfile() }
+      return { ok: true, cv: await getLatestCvProfile() }
     }
 
     case 'GHOSTHR_GET_SETTINGS': {
