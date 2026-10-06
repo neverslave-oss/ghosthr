@@ -1,15 +1,16 @@
-# Ghost Back — Chrome Extension Spec
+# ghostHR — Chrome Extension Spec
 
 **Status:** Spec (no code)
 **Branch:** `spec/ghost-back`
 **Date:** 2026-10-06
 **Author:** Fabio (idea) / Olly (spec)
+**Brand:** ghostHR
 
 ---
 
 ## 1. Vision (one line)
 
-A Chrome-browser extension that tells a candidate, before they apply, whether a job is worth it and what to do first to make it worth it — and keeps a crowdsourced record of which employers ghost so you can "ghost back."
+A Chrome-browser extension (**ghostHR**) that tells a candidate, before they apply, whether a job is worth it and what to do first to make it worth it — and keeps a crowdsourced record (reusing **jobibot** as the DB) of which employers ghost, so you can "ghost back."
 
 ## 2. The core decision loop
 
@@ -45,40 +46,50 @@ Three capabilities, one extension:
 
 Don't build all three at once. Sequencing:
 
-- **Phase 1 — CV + job "hold back" scanner.** Fastest to ship, easiest to demo. Chrome extension on LinkedIn + Indeed. Monetizable. *This is the MVP.*
-- **Phase 2 — Ghosting DB layer.** The moat (network effect), but slowest to build. Layer on once users exist. Reactive reporting + pre-apply lookups.
+- **Phase 1 — CV + job "hold back" scanner.** Fastest to ship, easiest to demo. *This is the MVP.*
+- **Phase 2 — Ghosting DB layer** on top of **jobibot** (extend it, don't build new). The moat (network effect), but slowest to populate. Reactive reporting + pre-apply lookups.
 - **Phase 3 — "Ghost back" + score feedback loop.** One-click withdraw that feeds the employer's score.
+
+### Target markets (Fabio decision)
+**Any job board with an ATS application form** — not just LinkedIn/Indeed. Most applications from known companies happen **outside LinkedIn**; their flow is near-identical (prefill a form from your CV, a few textareas, job description at top). Many run **Workable** or similar.
+Example: `https://apply.workable.com/boardofinnovation/j/531B141B6C/`
+
+So the extension targets: **Workable + other common ATS form flows** first, then generic form detection as a fallback.
 
 ## 5. Architecture (Phase 1 MVP)
 
+**Stack decision (Fabio: "it's a chrome extension, pick the best fit"):**
+- **Extension frontend:** TypeScript + Vite, content script + MV3 service worker + React (or Preact) for the popup/side panel. Best fit for a Chromium extension (MV3, module bundling, typed against the DOM/ATS forms).
+- **Backend/DB:** **extend jobibot** (Laravel + existing MySQL/Postgres) as the API + central data store — it already has `Company`, `JobAdvertisement`, `Candidate`, `Feedback`. Add the ghosting layer there. Reuses auth, admin, and the company graph.
+- **AI:** multi-provider, **local-first → Hugging Face → Doubleword → OpenRouter** routing (matches our other services).
+
 ```
-┌───────────────────────────── Chrome Extension ─────────────────────────────┐
-│  content script (scrapes job listing DOM on LinkedIn/Indeed)               │
+┌───────────────────────────── Chrome Extension (TS/Vite/MV3) ───────────────┐
+│  content script — ATS form detector + prefill (Workable + generic forms)   │
 │  popup / side panel (CV upload + verdict display)                          │
-│  background service worker (calls API, auth, storage)                      │
+│  MV3 service worker (calls jobibot API, auth, storage)                     │
 └──────────────────────────────────┬─────────────────────────────────────────┘
                                    │ HTTPS
                                    ▼
-┌────────────────────────────── Backend ────────────────────────────────────┐
-│  API (FastAPI)                                                             │
-│   POST /jobs/analyze   (job text + CV → verdict)                           │
-│   GET  /companies/{id}/ghost-score   (pre-apply gate)                      │
-│   POST /ghost-reports  (crowdsourced report, Phase 2)                      │
-│   POST /ghost-back     (withdraw event → updates score, Phase 3)           │
-│  AI layer (multi-provider: Claude/OpenAI/Ollama)                            │
-│  Data: PostgreSQL (jobs, companies, ghost_reports, users, events)          │
-│  Admin: review queue for ghost reports (verification)                      │
+┌────────────────────────────── Backend: jobibot (extended) ────────────────┐
+│  Laravel API routes                                                       │
+│   POST /api/ghost/jobs/analyze   (job text + CV → verdict)                │
+│   GET  /api/ghost/companies/{id}/ghost-score   (pre-apply gate)           │
+│   POST /api/ghost/reports         (crowdsourced report, Phase 2)          │
+│   POST /api/ghost/back            (withdraw event → updates score, P3)    │
+│  AI router: local-first → HF → doubleword → openrouter                     │
+│  Data: reuse jobibot tables + NEW ghost tables                             │
+│  Admin: existing jobibot admin + new review queue                         │
 └────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Data model (core tables)
-- `users` — auth, preferred CV (stored, encrypted), plan
-- `cv_profiles` — parsed CV snapshot per user (skills, years, education, projects)
-- `jobs` — scraped listing snapshot (title, company, posting age, repost flag, raw text)
-- `analyses` — verdict, hold-back actions, match score, reasoning
-- `companies` — canonical employer entity
-- `ghost_reports` — per-company ghost incidents (status, stage, timestamps)
-- `ghost_scores` — derived scores per company
+### Data model
+**Reuse from jobibot:** `users`, `companies`, `job_advertisements`, `candidates`, `feedbacks`.
+**New tables (added to jobibot):**
+- `ghost_cv_profiles` — parsed CV snapshot per user (skills, years, education, projects)
+- `ghost_analyses` — verdict, hold-back actions, match score, reasoning
+- `ghost_reports` — per-company ghost incidents (status, stage, timestamps, proof)
+- `ghost_scores` — derived ghosting scores per company
 - `ghost_back_events` — withdraw/no-follow-up events (Phase 3)
 
 ### The "hold back" AI prompt (the hard part)
@@ -102,16 +113,16 @@ Prompt contract → JSON:
 
 ## 6. Hard problems / risk register
 
-1. **Cold start on ghosting DB.** DidTheyGhostYou hit 2,000+ cos via viral LinkedIn; Ghostedd sat ~2,000 stories for a year. Moat needs a distribution channel, not just a product.
-2. **Verification.** Without evidence (screenshot of last email, application timestamp), the DB is a reputation-attack vector and companies will dispute. Every existing platform reviews manually. MVP must have a light verification signal + admin review queue.
-3. **Platform risk.** LinkedIn/Indeed block scraping and extension overlays; DOM changes break selectors → maintenance treadmill. Use resilient selectors + a scraping adapter, and degrade gracefully.
+1. **Cold start on ghosting DB.** DidTheyGhostYou hit 2,000+ cos via viral LinkedIn; Ghostedd sat ~2,000 stories for a year. Reusing jobibot's existing user base + candidate graph helps bootstrap, but a distribution channel is still needed.
+2. **Verification.** Without evidence (screenshot of last email, application timestamp), the DB is a reputation-attack vector. MVP needs a light verification signal + admin review queue (reuse jobibot moderation patterns).
+3. **Platform/ATS risk.** Workable + ATS DOM changes break selectors → maintenance treadmill. Use resilient selectors + a form-recognition adapter (generic 'job description + textareas' heuristics as fallback), and degrade gracefully.
 4. **"Hold back" advice quality.** This is where the AI must actually be good. Needs eval harness (golden set of job+CV → expected verdicts) to keep quality high.
-5. **Legal/privacy.** CV data is sensitive. Encrypt at rest, minimize retention, clear consent. Scraping ToS risk (client-side analysis only, no scraping on our servers).
+5. **Legal/privacy.** CV data is sensitive. Encrypt at rest, minimize retention, clear consent. Client-side analysis + prefill; no server-side scraping; the ATS form is on the user's machine/in their session.
 6. **Ghost-score fairness.** Companies can dispute; need an appeal path and to prevent weaponized downvoting (rate limits, verified application events).
 
 ## 7. Security & privacy stance
 - CVs and analyses processed with user consent; stored encrypted; user can delete.
-- Extension analyzes the job listing client-side first; only structured verdict round-trips to API.
+- Extension analyzes the job listing client-side first (and prefills the ATS form locally); only structured verdict round-trips to API.
 - No server-side page scraping; data minimization.
 - Ghost reports require a minimal proof signal (stage, dates, optional screenshot) and pass a review queue before affecting public score.
 
@@ -120,12 +131,12 @@ Prompt contract → JSON:
 - Pro: deep hold-back roadmap, unlimited analyses, ghost-back automation, advanced filtering.
 - Model parallels Ghoster (free tracking → AI tools as Pro).
 
-## 9. Open questions for Fabio (decision needed before build)
-1. **Brand/positioning:** name "Ghost Back" vs a less aggressive candidate-facing name? (The frame is good marketing, but "ghost back" as the product name may read as combative on the candidate-facing side.)
-2. **Markets first:** LinkedIn + Indeed only (EN) as MVP, or add a local market?
-3. **Stack preference:** reuse existing infra (Laravel/FastAPI?) — recommend **FastAPI + PostgreSQL** to match our Python services, but can do Laravel if you want one stack across the platform.
-4. **AI provider:** multi-provider like everything else, or pin one for MVP?
-5. **Who owns the ghosting DB data** and how is it licensed/moderted?
+## 9. Decisions locked (Fabio, 2026-10-06)
+1. **Name:** **ghostHR**.
+2. **Markets:** any job board with an ATS application form (Workable + generic forms), not just LinkedIn/Indeed — most known-company applications happen outside LinkedIn.
+3. **Ghosting DB:** **reuse jobibot** as the central DB/backend; add a ghost layer rather than build a new one.
+4. **AI providers:** **local-first → Hugging Face → Doubleword → OpenRouter**.
+5. **Stack:** it's a Chrome extension — **best-fit = TypeScript + Vite + MV3** for the extension; **extend jobibot (Laravel)** as the backend/DB.
 
 ## 10. Suggested next step
-Fabio reviews this spec and answers the 5 open questions (Section 9); then I write the implementation plan (Phase 1 MVP) with micro-steps and tests, on a dedicated feature branch.
+Write the implementation plan (Phase 1 MVP) with micro-steps and tests: (a) scaffold the TS/Vite/MV3 extension with an ATS form detector + CV prefill for Workable, (b) add a `analyze` endpoint to jobibot routed across the AI providers, (c) eval harness for the hold-back verdict. All on a dedicated feature branch, test-first, per the tracker workflow.
