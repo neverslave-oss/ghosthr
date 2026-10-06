@@ -149,6 +149,11 @@ async function pullAgentContext() {
   return res
 }
 
+// Expose the context puller to the main process (invoked via
+// webContents.executeJavaScript) so the deep agent can read real scan/CV/apps/
+// settings each turn.
+window.__ghosthrPullAgentContext = () => pullAgentContext()
+
 // Render the verdict into a short coaching reply.
 function formatCoaching(ctx) {
   const s = ctx.scan
@@ -187,15 +192,52 @@ function appendBot(text) {
   addMsg('bot', text)
 }
 
+// Run one deep-agent turn (in-process, main process). Uses the real LangGraph
+// agent with coach tools + VFS + web research. Falls back to the deterministic
+// analyze() coaching if the deep agent can't run (no configured provider / error).
+async function runDeepTurn(text, isCoaching) {
+  // The deep agent needs the scan/CV/apps/settings context refreshed first so
+  // main can read it on this turn.
+  try {
+    await pullAgentContext()
+  } catch { /* best-effort; the agent will report missing data itself */ }
+
+  addMsg('bot', '🤔 Thinking…')
+  try {
+    const res = window.ghosthr && await window.ghosthr.agentTurn(text)
+    if (res && res.ok && res.reply) {
+      chat.removeChild(chat.lastChild)
+      appendBot(res.reply)
+      return
+    }
+    chat.removeChild(chat.lastChild)
+    if (isCoaching) {
+      const ctx = await pullAgentContext()
+      appendBot(formatCoaching(ctx))
+      return
+    }
+    const err = (res && res.error) || 'no reply from agent'
+    appendBot('⚠️ Deep agent unavailable (' + err + '). Try "score my fit" for offline coaching.')
+  } catch (e) {
+    chat.removeChild(chat.lastChild)
+    if (isCoaching) {
+      try { appendBot(formatCoaching(await pullAgentContext())) } catch { appendBot('⚠️ Could not reach the ghostHR engine.') }
+    } else {
+      appendBot('⚠️ Agent error: ' + (e && e.message))
+    }
+  }
+}
+
 function handleAgent(text) {
   addMsg('user', text)
   const lower = text.toLowerCase()
 
-  // Coaching: ask for verdict / score / fit on the scanned job vs the CV.
-  if (/(verdict|score|fit|coach|advice|should i apply|would i)/.test(lower)) {
-    pullAgentContext()
-      .then((ctx) => appendBot(formatCoaching(ctx)))
-      .catch((e) => appendBot('⚠️ Could not reach the ghostHR engine: ' + (e && e.message)))
+  // Coaching: run the deep agent (in-process). It reads scan/CV/apps/settings
+  // via the extension bridge and uses tools (coach, VFS, web research). Falls
+  // back to the deterministic analyze() coaching if the deep agent can't run
+  // (e.g. no configured provider).
+  if (/(verdict|score|fit|coach|advice|should i apply|would i|could you|recommend|tell me about)/.test(lower)) {
+    runDeepTurn(text, true)
     return
   }
 
@@ -209,14 +251,13 @@ function handleAgent(text) {
 
   if (/(help|what can you)/i.test(lower)) {
     appendBot(
-      'I\'m ghostHR\'s Agent tab.\n\nYou can:\n• "open <job-URL>" to navigate the Browser tab\n• Paste a job URL and I\'ll open it\n\nNext phase: the agent will read the scanned job + your CV and give hold-back coaching advice here. For now, scan the page in the Browser tab using the ghostHR extension.',
+      'I\'m ghostHR\'s deep-agent coach.\n\nYou can:\n• "open <job-URL>" — navigate the Browser tab (extension scans/autofills there)\n• "score my fit" / "should I apply?" — deep-agent coaching on the scanned job vs your CV\n• "research <company>" — live web research to ground the advice\n\nI read your current scan, CV, and applications, use a private virtual workspace for files, and can search the web.'
     )
     return
   }
 
-  appendBot(
-    'I can open job pages in the Browser tab (the ghostHR extension runs there to scan + autofill).\n\nTry: "open https://example.com/jobs/senior-engineer"\n\nDeeper agent capabilities (reading your scan + CV for coaching advice) are the next phase.',
-  )
+  // Everything else: run the deep agent (non-coaching context).
+  runDeepTurn(text, false)
 }
 
 function send() {
