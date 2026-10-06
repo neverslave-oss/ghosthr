@@ -16,7 +16,7 @@
 
 import { routeLlm } from './providers'
 import { enabledProviders, type Settings } from './settings'
-import type { ParsedCv } from './verdict'
+import { COMMON_SKILLS, type ParsedCv } from './verdict'
 
 export type CvFileKind = 'pdf' | 'docx' | 'image'
 
@@ -110,6 +110,12 @@ export interface CvParseInput {
  * Parse a CV through the routed AI providers. Prefers local extraction (text)
  * when available, otherwise sends the image to a vision provider. Returns
  * ParsedCv.
+ *
+ * Standalone-first: if no provider is configured/usable, or every provider
+ * fails, falls back to a local heuristic parser (parseCvLocally) so the CV is
+ * still usable offline — providers enhance, never gate. This is what keeps the
+ * "Autofill form" / "Score my fit" actions from staying disabled forever just
+ * because no AI provider is configured.
  */
 export async function parseCv(input: CvParseInput): Promise<ParsedCv> {
   const providers = enabledProviders(input.settings).map((p) => ({
@@ -119,26 +125,148 @@ export async function parseCv(input: CvParseInput): Promise<ParsedCv> {
     model: p.model,
   }))
 
-  const result = await routeLlm(
-    providers,
-    () => {
-      const content: ChatMessageContent = [
-        { type: 'text', text: 'Parse this CV and return the structured JSON profile.' },
-      ]
-      if (input.imageDataUrl) {
-        content.push({ type: 'image_url', image_url: { url: input.imageDataUrl } })
-      } else if (input.text) {
-        content.push({ type: 'text', text: `CV text:\n${input.text?.slice(0, 20000)}` })
-      }
-      return [
-        { role: 'system' as const, content: CV_PARSE_SYSTEM },
-        { role: 'user' as const, content },
-      ]
-    },
-    { signal: input.signal, maxTokens: 1024 },
-  )
+  // Local text (pdf/docx) is free and always available — try it first.
+  if (input.text && providers.length === 0) {
+    return parseCvLocally(input.text)
+  }
 
-  return parseCvJson(result.result.text)
+  try {
+    const result = await routeLlm(
+      providers,
+      () => {
+        const content: ChatMessageContent = [
+          { type: 'text', text: 'Parse this CV and return the structured JSON profile.' },
+        ]
+        if (input.imageDataUrl) {
+          content.push({ type: 'image_url', image_url: { url: input.imageDataUrl } })
+        } else if (input.text) {
+          content.push({ type: 'text', text: `CV text:\n${input.text?.slice(0, 20000)}` })
+        }
+        return [
+          { role: 'system' as const, content: CV_PARSE_SYSTEM },
+          { role: 'user' as const, content },
+        ]
+      },
+      { signal: input.signal, maxTokens: 1024 },
+    )
+    return parseCvJson(result.result.text)
+  } catch (e: any) {
+    // Standalone fallback: if we have local text (pdf/docx) and the LLM path
+    // failed (no provider, offline, or an error), parse heuristically instead of
+    // failing the whole upload.
+    if (input.text) {
+      return parseCvLocally(input.text)
+    }
+    throw e
+  }
+}
+
+const COMMON_SKILL_SET = new Set(COMMON_SKILLS.map((s) => s.toLowerCase()))
+
+/**
+ * Local heuristic CV parser — zero-provider, offline-safe fallback.
+ * Extracts name/email/phone, skills (against the shared vocabulary + inline
+ * lists), years experience, education and projects from raw CV text. Pure +
+ * unit-testable.
+ */
+export function parseCvLocally(text: string): ParsedCv {
+  const t = (text ?? '').replace(/\r/g, '')
+  const email =
+    t.match(/[\w.+-]+@[\w-]+(?:\.[\w-]+)+/i)?.[0]?.toLowerCase() ?? undefined
+  const phone =
+    t.match(/(?:\+\d{1,3}[\s.-]?)?(?:\(?\d{2,4}\)?[\s.-]?)?\d{3}[\s.-]?\d{3,4}(?:[\s.-]?\d{2,4})?/)?.[0]?.trim() ?? undefined
+  const name = guessName(t)
+
+  const skills = extractSkills(t)
+
+  // Years of experience: "X+ years" / "X years" patterns.
+  const yearsMatch = t.match(/(\d{1,2})\s*\+?\s*years?\b/i)
+  const years_experience = yearsMatch ? Number(yearsMatch[1]) : undefined
+
+  const education = t
+    .split(/\n+/)
+    .map((l) => l.trim())
+    .filter((l) => /(bachelor|master|bsc|msc|mba|phd|degree|university|diploma)/i.test(l))
+    .slice(0, 6)
+
+  const projects = t
+    .split(/\n+/)
+    .map((l) => l.trim())
+    .filter((l) => /(built|developed|led|create[d]?|project:|portfolio)/i.test(l))
+    .filter((l) => l.length > 8 && l.length < 200)
+    .slice(0, 8)
+
+  const summary =
+    t.split(/\n+/).find((l) => l.trim().length > 40 && !l.includes('@'))?.trim() ?? ''
+
+  return {
+    name,
+    email,
+    phone,
+    skills,
+    years_experience,
+    education: education.length ? education : undefined,
+    projects: projects.length ? projects : undefined,
+    raw_text: summary || t.slice(0, 2000),
+  }
+}
+
+function guessName(t: string): string | undefined {
+  // First line that looks like a person's name (2-4 capitalized words, no digits).
+  const line =
+    t.split(/\n+/).find((l) => {
+      const words = l.trim().split(/\s+/).filter(Boolean)
+      return (
+        words.length >= 2 &&
+        words.length <= 4 &&
+        words.every((w) => /^[A-Z][a-z]+$/.test(w) || /^[A-Z]\.?$/.test(w)) &&
+        !/\d/.test(l)
+      )
+    })?.trim() ?? ''
+  if (line) return line
+
+  // Fallback for single-line text (e.g. pdfjs extracting a one-line CV):
+  // the leading run of capitalized words before the first email/phone/skill
+  // clue is usually the name.
+  const head = t.slice(0, 60)
+  const words = head.split(/\s+/)
+  const leading = []
+  for (const w of words) {
+    if (/^[A-Z][a-z]+$/.test(w)) leading.push(w)
+    else break
+  }
+  if (leading.length >= 2) return leading.join(' ')
+  return undefined
+}
+
+function extractSkills(t: string): string[] {
+  const found = new Set<string>()
+  const lower = t.toLowerCase()
+  // Known vocabulary present in the text.
+  for (const s of COMMON_SKILLS) {
+    if (new RegExp(`\\b${escapeRegex(s)}\\b`, 'i').test(t)) found.add(s)
+  }
+  // Inline comma / bullet-separated skill lists (e.g. "Skills: Python, React, SQL").
+  const section = t.match(/(?:skills?|tech stack|technologies?)\s*[:\-]\s*([^\n]{0,200})/i)?.[1]
+  if (section) {
+    for (const item of section.split(/[,;•|]/)) {
+      const w = item.trim()
+      if (w && w.length >= 2 && w.length <= 30 && /^[a-z0-9+#.\s-]+$/i.test(w)) found.add(toTitleCase(w))
+    }
+  }
+  if (found.size === 0 && lower.includes('skill')) found.add('communication')
+  return [...found]
+}
+
+function toTitleCase(s: string): string {
+  return s
+    .split(/\s+/)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ')
+}
+
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
 type ChatMessageContent = Array<
