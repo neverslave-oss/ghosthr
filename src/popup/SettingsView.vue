@@ -10,7 +10,7 @@ const s = props.store
   <main v-if="s.settings">
     <section class="section">
       <h2><span>AI providers</span></h2>
-      <div v-for="pid in providerOrder" :key="pid" class="provider">
+      <div v-for="pid in providerOrder" :key="pid" class="provider" v-if="s.provider(pid)">
         <label class="provhead">
           <input type="checkbox" v-model="s.provider(pid)!.enabled" />
           <b>{{ PROVIDER_CATALOG[pid].label }}</b>

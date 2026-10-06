@@ -16,7 +16,7 @@ const s = props.store
         then pick a model. Your chosen Scan model is used to read the page.
       </p>
 
-      <div v-for="pid in providerOrder" :key="pid" class="provider">
+      <div v-for="pid in providerOrder" :key="pid" class="provider" v-if="s.provider(pid)">
         <label class="provhead">
           <input type="checkbox" v-model="s.provider(pid)!.enabled" />
           <b>{{ PROVIDER_CATALOG[pid].label }}</b>
@@ -37,11 +37,11 @@ const s = props.store
         </template>
       </div>
 
-      <button class="primary" :disabled="!s.settings || !s.hasUsableProvider" @click="s.completeSetup">
+      <button class="primary" :disabled="!s.settings || !s.hasUsable" @click="s.completeSetup">
         Continue
       </button>
       <p class="hint" style="margin-top:8px">
-        {{ s.hasUsableProvider ? 'Great — a usable provider is configured.' : 'Enable a provider and add a key/model to continue.' }}
+        {{ s.hasUsable ? 'Great — a usable provider is configured.' : 'Enable a provider and add a key/model to continue.' }}
       </p>
     </section>
   </main>
