@@ -51,19 +51,58 @@ urlInput.addEventListener('keydown', (e) => {
 // The extension's own vision-scan uses chrome.tabs.captureVisibleTab, which
 // Electron does NOT implement; but <webview>.capturePage() works and returns
 // the page as a PNG, so desktop capture never needs the extension API.
+//
+// The captured PNG is fed into the SAME vision pipeline as a browser scan:
+// we run JS inside the webview to dispatch __ghosthr_scan_image with the image;
+// the extension's content script (isolated world) relays it to the background
+// GHOSTHR_SCAN_IMAGE handler via chrome.runtime, then writes the scan result
+// onto <html data-ghosthr-result>. We poll that attribute back out.
 const captureBtn = document.getElementById('capture')
 if (captureBtn && webview) {
   captureBtn.addEventListener('click', async () => {
     try {
+      captureBtn.disabled = true
+      captureBtn.textContent = 'Scanning…'
       const image = await webview.capturePage()
       const dataUrl = image.toDataURL()
-      // TODO(next phase): hand this PNG to the vision scan / backend.
-      const pre = document.createElement('a')
-      pre.href = dataUrl
-      pre.download = 'ghosthr-page.png'
-      pre.click()
+
+      // Clear any prior result, then dispatch the image into the webview page.
+      await webview.executeJavaScript(
+        `document.documentElement.removeAttribute('data-ghosthr-result');` +
+          `document.dispatchEvent(new CustomEvent('__ghosthr_scan_image', { detail: { imageDataUrl: ${JSON.stringify(dataUrl)} } })); true`,
+      )
+
+      // Poll the result attribute the content script writes back.
+      let res = null
+      for (let i = 0; i < 60 && !res; i++) {
+        await new Promise((r) => setTimeout(r, 500))
+        const raw = await webview.executeJavaScript(
+          `document.documentElement.getAttribute('data-ghosthr-result')`,
+        )
+        if (raw) {
+          try { res = JSON.parse(raw) } catch { res = null }
+        }
+      }
+
+      if (res?.ok && res.scan) {
+        const s = res.scan
+        appendBot(
+          `📋 Vision scan complete (${res.offline ? 'offline' : 'AI'}):\n` +
+            `Job: ${s.jobTitle || '(no title)'}${s.company ? ' — ' + s.company : ''}\n` +
+            `Fields detected: ${s.fields?.length ?? 0}\n` +
+            (s.jobDescription
+              ? `Description: ${s.jobDescription.slice(0, 200)}${s.jobDescription.length > 200 ? '…' : ''}`
+              : ''),
+        )
+      } else {
+        appendBot('⚠️ Vision scan failed: ' + (res?.error || 'no result'))
+      }
     } catch (e) {
-      console.error('[ghostHR] capture failed:', e)
+      console.error('[ghostHR] capture/scan failed:', e)
+      appendBot('⚠️ Scan error: ' + (e && e.message))
+    } finally {
+      captureBtn.disabled = false
+      captureBtn.textContent = 'Capture page'
     }
   })
 }

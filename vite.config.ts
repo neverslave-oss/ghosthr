@@ -20,6 +20,6 @@ export default defineConfig({
     // tests/e2e/* are Playwright tests (playwright/test), not vitest — keep
     // them out of the unit-test runner to avoid the 'test.describe() was not
     // expected' collision. Run them with `npm run test:e2e`.
-    exclude: ['node_modules/**', 'dist/**', 'tests/e2e/**'],
+    exclude: ['node_modules/**', 'dist/**', 'tests/e2e/**', 'desktop/**'],
   },
 })
