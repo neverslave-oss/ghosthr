@@ -24,6 +24,12 @@ chrome.runtime.onInstalled.addListener(async () => {
   }
 })
 
+// Replaces the old toolbar popup: clicking the toolbar icon now opens the
+// docked side panel (Leo-style sidebar next to the page).
+chrome.sidePanel
+  ?.setPanelBehavior({ openPanelOnActionClick: true })
+  .catch((err) => console.error('[ghostHR] side panel setup failed', err))
+
 // Clear any stale badge when navigating to a fresh tab/page.
 chrome.tabs?.onUpdated?.addListener((_tabId, changeInfo) => {
   if (changeInfo.status === 'loading') {

@@ -3,7 +3,7 @@
   "name": "ghostHR",
   "version": "0.1.0",
   "description": "Decide whether a job is worth applying to, get hold-back prep, and track applications — standalone-first.",
-  "permissions": ["storage", "activeTab", "scripting", "tabs"],
+  "permissions": ["storage", "activeTab", "scripting", "tabs", "sidePanel"],
   "host_permissions": ["<all_urls>"],
   "icons": {
     "16": "src/icons/icon16.png",
@@ -12,7 +12,6 @@
     "128": "src/icons/icon128.png"
   },
   "action": {
-    "default_popup": "src/popup/index.html",
     "default_title": "ghostHR",
     "default_icon": {
       "16": "src/icons/icon16.png",
@@ -20,6 +19,9 @@
       "48": "src/icons/icon48.png",
       "128": "src/icons/icon128.png"
     }
+  },
+  "side_panel": {
+    "default_path": "src/popup/index.html"
   },
   "background": {
     "service_worker": "src/background.ts",
