@@ -13,6 +13,12 @@
 const { app, BrowserWindow, session, ipcMain, Tray, Menu, nativeImage } = require('electron')
 const path = require('node:path')
 const fs = require('node:fs')
+const http = require('node:http')
+
+// Loopback port for the extension's Agent tab to reach this desktop agent when
+// ghostHR is loaded inside the desktop (browser-extension wire). Standalone
+// browser usage falls back to the extension's own provider chat instead.
+const AGENT_PORT = 18977
 
 // Deep-agent wiring (in-process, one installer, no Python).
 const { buildDeepAgent, modelForProvider, pickProvider } = require('./agent/deepAgent')
@@ -163,10 +169,14 @@ async function getExtensionContextViaBridge() {
 // Cache latest context so the agent tools can read it during a turn.
 let agentContextCache = null
 
-ipcMain.handle('ghosthr:agent-turn', async (_evt, payload) => {
-  const message = String(payload?.message || '').trim()
-  if (!message) return { ok: false, error: 'empty message' }
-
+/**
+ * Run one deep-agent turn with the shared ghostHR context and return the full
+ * assembled reply. `emit` is an optional per-token callback (used by the
+ * desktop renderer for streaming); the extension's loopback HTTP bridge calls
+ * it with no emitter and just reads back the final text.
+ */
+async function runAgentTurn(message, emit) {
+  const onDelta = typeof emit === 'function' ? emit : () => {}
   try {
     // 1. Ensure the VFS exists (persisted under userData).
     if (!agentVfs) {
@@ -199,14 +209,10 @@ ipcMain.handle('ghosthr:agent-turn', async (_evt, payload) => {
       })
     }
 
-    // 4. Run the agent turn, streaming assistant tokens live to the renderer.
+    // 4. Run the agent turn, streaming assistant tokens via onDelta.
     // streamMode 'messages' yields [messageChunk, metadata] tuples with
     // per-token deltas; 'values' gives the full latest state (used as a
     // robust fallback if a provider/agent doesn't emit message chunks).
-    const sender = _evt.sender
-    const emit = (delta) => {
-      try { sender.send('ghosthr:agent-chunk', { delta }) } catch { /* window closed */ }
-    }
     const final = await deepAgent.agent.stream(
       { messages: [{ role: 'user', content: message }] },
       { streamMode: ['values', 'messages'] },
@@ -218,7 +224,7 @@ ipcMain.handle('ghosthr:agent-turn', async (_evt, payload) => {
         const meta = chunk[1] || {}
         if (meta.langgraph_node === 'agent') {
           const d = chunk[0].content
-          if (typeof d === 'string' && d) emit(d)
+          if (typeof d === 'string' && d) onDelta(d)
         }
         continue
       }
@@ -229,20 +235,94 @@ ipcMain.handle('ghosthr:agent-turn', async (_evt, payload) => {
       if (last?.role === 'assistant' && typeof last.content === 'string') {
         const delta = lastText.length ? last.content.slice(lastText.length) : last.content
         lastText = last.content
-        if (delta) emit(delta)
+        if (delta) onDelta(delta)
       }
     }
-    // Signal completion so the renderer finalizes the streaming bubble.
-    try {
-      sender.send('ghosthr:agent-done', {
-        ok: true,
-        model: deepAgent.modelUsed?.modelName || '',
-        tools: deepAgent.tools,
-      })
-    } catch { /* window closed */ }
-
-    return { ok: true, model: deepAgent.modelUsed?.modelName || '', tools: deepAgent.tools }
+    return {
+      ok: true,
+      text: lastText,
+      model: deepAgent.modelUsed?.modelName || '',
+      tools: deepAgent.tools,
+    }
   } catch (e) {
     return { ok: false, error: String(e?.message ?? e) }
   }
+}
+
+ipcMain.handle('ghosthr:agent-turn', async (_evt, payload) => {
+  const message = String(payload?.message || '').trim()
+  if (!message) return { ok: false, error: 'empty message' }
+  const sender = _evt.sender
+  const emit = (delta) => {
+    try { sender.send('ghosthr:agent-chunk', { delta }) } catch { /* window closed */ }
+  }
+  const res = await runAgentTurn(message, emit)
+  try {
+    sender.send('ghosthr:agent-done', {
+      ok: res.ok,
+      model: res?.model || '',
+      tools: res?.tools || [],
+    })
+  } catch { /* window closed */ }
+  return res
+})
+
+// ---------------------------------------------------------------------------
+// Loopback agent bridge — lets the extension's Agent tab (when loaded inside
+// this desktop app) call the same deep agent. If this desktop isn't running,
+// the extension falls back to its standalone provider chat.
+//   GET  /agent/health -> { ok:true }
+//   POST /agent        -> { message } -> { ok, text, model, tools | error }
+// ---------------------------------------------------------------------------
+function startAgentBridge() {
+  const server = http.createServer(async (req, res) => {
+    res.setHeader('Access-Control-Allow-Origin', 'chrome-extension://*')
+    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS')
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
+    if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return }
+
+    if (req.method === 'GET' && req.url === '/agent/health') {
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ ok: true }))
+      return
+    }
+
+    if (req.method === 'POST' && req.url === '/agent') {
+      let body = ''
+      for await (const c of req) body += c
+      let message = ''
+      try { message = String(JSON.parse(body)?.message || '').trim() } catch { /* fallthrough */ }
+      if (!message) {
+        res.writeHead(400, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ ok: false, error: 'empty message' }))
+        return
+      }
+      const result = await runAgentTurn(message)
+      res.writeHead(result.ok ? 200 : 500, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify(result))
+      return
+    }
+
+    res.writeHead(404, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ ok: false, error: 'not found' }))
+  })
+  server.listen(AGENT_PORT, '127.0.0.1', () => {
+    console.log(`[ghostHR] Agent bridge on http://127.0.0.1:${AGENT_PORT}`)
+  })
+  server.on('error', (e) => {
+    console.warn('[ghostHR] Agent bridge unavailable:', e?.message ?? e)
+  })
+  return server
+}
+
+app.whenReady().then(async () => {
+  await loadGhostHrExtension()
+  createWindow()
+  createTray()
+  startAgentBridge()
+
+  app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    else showMainWindow()
+  })
 })

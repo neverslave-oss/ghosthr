@@ -7,14 +7,14 @@
  */
 import { computed, reactive, ref } from 'vue'
 import { analyze, type ParsedCv, type Verdict } from '../ai/verdict'
-import { PROVIDER_CATALOG, PROVIDER_ORDER, type ProviderId } from '../ai/providers'
+import { PROVIDER_CATALOG, PROVIDER_ORDER, routeLlm, type ProviderId } from '../ai/providers'
 import { hasUsableProvider, type Settings, type ThemePref } from '../ai/settings'
 import { getProviderModels, type ModelChoice } from '../ai/models'
 import type { PageScan } from '../ai/scanner'
 import { detectCvKind, blobToDataUrl, extractDocxText, type CvFileKind } from '../ai/cvocr'
 import { extractPdfText, rasterizePdf } from '../ai/pdftools'
 
-export type Tab = 'scan' | 'track' | 'settings'
+export type Tab = 'scan' | 'track' | 'settings' | 'agent'
 type Msg = { type: string; [k: string]: any }
 
 export const providerOrder = PROVIDER_ORDER
@@ -44,6 +44,105 @@ export function usePopupStore() {
 
   // Tracked
   const applications = ref<any[]>([])
+
+  // Agent chat (extension Agent tab)
+  const agentMessages = ref<{ role: 'user' | 'assistant'; text: string }[]>([])
+  const agentBusy = ref(false)
+  // 'desktop' | 'standalone' | '' (empty until first send)
+  const agentMode = ref('')
+
+  // Desktop deep-agent loopback bridge. When ghostHR is loaded inside the
+  // Electron desktop app, the desktop main process exposes the full LangGraph
+  // agent here. Standalone browser usage falls back to our own provider chat.
+  const AGENT_BRIDGE = 'http://127.0.0.1:18977'
+
+  async function desktopAgentHealth(): Promise<boolean> {
+    try {
+      const ctl = new AbortController()
+      const t = setTimeout(() => ctl.abort(), 1200)
+      const res = await fetch(`${AGENT_BRIDGE}/agent/health`, { signal: ctl.signal })
+      clearTimeout(t)
+      if (!res.ok) return false
+      const j = await res.json()
+      return !!j?.ok
+    } catch {
+      return false
+    }
+  }
+
+  function buildStandaloneSystemPrompt(): string {
+    const s = scan.value
+    const c = cv.value
+    const parts: string[] = [
+      'You are ghostHR\u2019s job-coach agent. Help the user decide about a job\n' +
+      'application, score their fit, and give actionable next steps. Be honest,' +
+      'specific and concise.',
+    ]
+    if (s?.jobDescription) {
+      parts.push(
+        `Current job scan (${s.jobTitle || 'untitled'}${s.company ? ' at ' + s.company : ''}):\n` +
+          s.jobDescription.slice(0, 1200),
+      )
+    } else {
+      parts.push('No job scanned yet \u2014 tell the user to scan a job page first for fit scoring.')
+    }
+    if (c) {
+      const skills = c.skills?.length ? c.skills.join(', ') : '(none listed)'
+      const years = c.years_experience ?? 'unknown'
+      const projects = c.projects?.length ? c.projects.join('; ') : '(none)'
+      parts.push(`Candidate CV: skills=[${skills}] years=${years} projects=[${projects}]`)
+    }
+    return parts.join('\n\n')
+  }
+
+  // Send one user message to the agent. Prefers the desktop deep agent (if
+  // this extension is running inside the desktop app); otherwise falls back to
+  // the standalone provider chat via the same routing as every other AI call.
+  async function sendAgent(text: string): Promise<void> {
+    const message = text.trim()
+    if (!message || agentBusy.value) return
+    agentBusy.value = true
+    agentMessages.value.push({ role: 'user', text: message })
+    const placeholder = { role: 'assistant' as const, text: '…' }
+    agentMessages.value.push(placeholder)
+
+    try {
+      const useDesktop = await desktopAgentHealth()
+      if (useDesktop) {
+        agentMode.value = 'desktop'
+        const res = await fetch(`${AGENT_BRIDGE}/agent`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message }),
+        })
+        const j = await res.json().catch(() => ({}))
+        if (!j?.ok) throw new Error(j?.error || 'desktop agent error')
+        placeholder.text = j.text || '(empty reply)'
+        return
+      }
+
+      // Standalone fallback: route through the configured providers, reusing
+      // the exact context the desktop deep agent sees.
+      agentMode.value = 'standalone'
+      if (!settings.value || !hasUsableProvider(settings.value)) {
+        throw new Error('No usable AI provider configured. Open Settings to add one.')
+      }
+      const providers = settings.value.providers
+        .filter((p) => p.enabled)
+        .map((p) => ({ id: p.id, baseUrl: p.baseUrl, apiKey: p.apiKey, model: p.model }))
+      const res2 = await routeLlm(providers as any, (pid: ProviderId) => [
+        { role: 'system' as const, content: buildStandaloneSystemPrompt() },
+        ...agentMessages.value
+          .filter((m) => m !== placeholder)
+          .map((m) => ({ role: m.role, content: m.text })),
+      ])
+      placeholder.text = res2.result.text.trim() || '(empty reply)'
+    } catch (e: any) {
+      placeholder.text = `⚠️ ${e?.message ?? e}`
+    } finally {
+      agentBusy.value = false
+    }
+  }
 
   // Dynamic model picker
   const modelChoices = ref<Record<ProviderId, ModelChoice[]>>({} as any)
@@ -371,9 +470,10 @@ export function usePopupStore() {
     tab, status, statusError, loading,
     settings, scan, scannedUrl, verdict, cv, cvFileName, cvKind, applications,
     modelChoices, modelLoading, recClass, cvShortName,
+    agentMessages, agentBusy, agentMode,
     provider, staticModels, hasUsable, cycleTheme,
     refreshSettings, scanPage, onCvFile, runVerdict, autofill, trackApplication,
     loadApplications, restoreScan, saveSettings, loadModelChoices, loadAllModelChoices,
-    setupNeeded, completeSetup, init,
+    setupNeeded, completeSetup, init, sendAgent,
   })
 }
