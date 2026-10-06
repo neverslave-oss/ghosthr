@@ -264,8 +264,30 @@ export function usePopupStore() {
     await Promise.all(providerOrder.map((pid) => loadModelChoices(pid)))
   }
 
+  async function restoreCv() {
+    try {
+      const res = await send({ type: 'GHOSTHR_GET_CV' })
+      // GET_CV returns a stored CvProfile ({ id, name, raw_text, parsed_json });
+      // the parsed CV is JSON-encoded in parsed_json. Unwrap it back into the
+      // ParsedCv shape the rest of the store/autofill expects.
+      const profile: any = res?.cv
+      if (profile?.parsed_json) {
+        try {
+          const parsed: ParsedCv = JSON.parse(profile.parsed_json)
+          cv.value = parsed
+        } catch {
+          // ignore corrupt stored JSON
+        }
+      }
+      cvFileName.value = profile?.name ?? cv.value?.name ?? ''
+      cvKind.value = detectCvKind(cvFileName.value, '')
+    } catch {
+      /* no persisted CV yet */
+    }
+  }
+
   async function init() {
-    await Promise.all([loadApplications(), refreshSettings(), restoreScan()])
+    await Promise.all([loadApplications(), refreshSettings(), restoreScan(), restoreCv()])
     // NOTE: intentionally do NOT auto-fetch provider model lists on open.
     // The picker already shows models from the static catalog + suggestions,
     // so no network calls are needed at startup. Auto-fetching here hit every
