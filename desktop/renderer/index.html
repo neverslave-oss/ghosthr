@@ -10,111 +10,90 @@
         --bg: #cccccc; --panel: #ffffff; --ink: #1a1a1a; --ink-dim: #666666;
         --accent: #8b5cf6; --accent-2: #06b6d4; --line: #d4d4d4; --ok: #16a34a;
       }
-      /* Dark theme — the desktop is light by default; [data-theme="dark"]
-         flips the palette to deep slate for night use. */
       [data-theme="dark"] {
         --bg: #0f172a; --panel: #1e293b; --ink: #e2e8f0; --ink-dim: #94a3b8;
         --accent: #8b5cf6; --accent-2: #06b6d4; --line: #334155; --ok: #34d399;
       }
       html, body { height: 100%; }
       body {
+        display: flex; flex-direction: column; height: 100vh; overflow: hidden;
         background: var(--bg); color: var(--ink);
-        font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
-        display: flex; flex-direction: column; overflow: hidden;
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
       }
       header {
-        display: flex; align-items: center; gap: 10px;
-        padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--line);
+        display: flex; align-items: center; gap: 12px; padding: 8px 14px;
+        background: var(--panel); border-bottom: 1px solid var(--line);
       }
-      .brand { display: flex; align-items: center; gap: 10px; }
-      .brand .mark {
-        width: 26px; height: 26px; border-radius: 6px; display: grid; place-items: center;
-        background: linear-gradient(135deg, #8b5cf6, #4f46e5); color: #fff; font-weight: 800;
+      .brand { display: flex; align-items: center; gap: 8px; }
+      .mark {
+        width: 26px; height: 26px; border-radius: 7px; display: grid; place-items: center;
+        background: var(--accent); color: #fff; font-weight: 800; font-size: 13px;
       }
-      .brand .title { font-weight: 700; }
-      .brand .title span { color: var(--accent-2); }
-      .tabs { display: flex; gap: 4px; margin-left: 16px; }
-      .tabs button {
-        background: transparent; border: none; color: var(--ink-dim); font-size: 14px;
-        padding: 8px 16px; border-radius: 6px; cursor: pointer; font-weight: 600;
+      .title { font-size: 16px; font-weight: 700; }
+      .title span { color: var(--accent); }
+      .tabs { display: flex; gap: 4px; margin-left: 8px; }
+      .tabs button, .panel-btn {
+        background: transparent; border: none; color: var(--ink-dim); cursor: pointer;
+        padding: 8px 12px; border-radius: 8px; font-size: 13px; font-weight: 600;
       }
-      .tabs button.active { background: var(--accent); color: #fff; }
-      /* Theme toggle — sits on the right end of the header. */
-      .theme-toggle {
-        margin-left: auto;
-        background: transparent; border: 1px solid var(--line); color: var(--ink);
-        width: 32px; height: 32px; border-radius: 6px; cursor: pointer;
-        font-size: 15px; display: grid; place-items: center;
-      }
-      .theme-toggle:hover { background: var(--panel); }
-      #urlbar {
-        flex: 1; margin-left: 16px; display: flex; gap: 6px;
-      }
+      .tabs button.active { background: var(--bg); color: var(--accent); }
+      #urlbar { flex: 1; margin-left: 12px; display: flex; gap: 6px; }
       #urlbar input {
-        flex: 1; background: #fff; border: 1px solid var(--line); color: var(--ink);
+        flex: 1; background: var(--bg); border: 1px solid var(--line); color: var(--ink);
         border-radius: 6px; padding: 6px 10px; font-size: 13px;
       }
-      #urlbar button, #go {
+      #urlbar button {
         background: var(--accent); border: none; color: #fff; border-radius: 6px;
         padding: 6px 12px; cursor: pointer; font-weight: 600;
       }
-      main { flex: 1; display: flex; min-height: 0; }
-      .panel { flex: 1; display: none; flex-direction: column; min-width: 0; }
+      .spacer { flex: 1; }
+      .ext-btn {
+        display: flex; align-items: center; gap: 6px; background: var(--accent);
+        border: none; color: #fff; border-radius: 8px; padding: 7px 12px;
+        cursor: pointer; font-weight: 600; font-size: 13px;
+      }
+      .theme-toggle { background: var(--bg); border: 1px solid var(--line); color: var(--ink); border-radius: 8px; padding: 6px 10px; cursor: pointer; }
+      main { flex: 1; display: flex; min-width: 0; min-height: 0; }
+      .panel { flex: 1; display: none; flex-direction: column; min-width: 0; min-height: 0; }
       .panel.active { display: flex; }
-      /* Browser tab */
-      .browser { padding: 8px; }
       webview {
-        flex: 1; width: 100%; background: #fff; border-radius: 6px;
+        flex: 1; width: 100%; background: var(--bg); border-radius: 6px;
         border: 1px solid var(--line); min-height: 0;
       }
-      .browser { display: flex; flex-direction: column; }
-      /* Agent tab — split-screen chat + browser */
-      .agent.split { flex-direction: row; }
-      .agent .chat-pane {
-        flex: 0 0 45%; display: flex; flex-direction: column; min-width: 0;
-        border-right: 1px solid var(--line);
-      }
+      .browser { padding: 8px; display: flex; flex-direction: column; }
+      /* Agent tab — split-screen. Browser LEFT, chat RIGHT. */
+      .agent { flex-direction: row; }
       .agent .agent-browser {
         flex: 1; display: flex; flex-direction: column; min-width: 0; padding: 8px;
+        border-right: 1px solid var(--line);
+      }
+      .agent .chat-pane {
+        flex: 0 0 42%; display: flex; flex-direction: column; min-width: 0;
+        border-left: 1px solid var(--line);
       }
       .agent .chat { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
-      .msg { max-width: 78%; padding: 10px 14px; border-radius: 12px; font-size: 14px; line-height: 1.5; white-space: pre-wrap; }
+      .msg { max-width: 85%; padding: 10px 14px; border-radius: 12px; font-size: 14px; line-height: 1.5; white-space: pre-wrap; }
       .msg.user { align-self: flex-end; background: var(--accent); color: #fff; }
       .msg.bot { align-self: flex-start; background: var(--panel); border: 1px solid var(--line); }
-      .msg.bot.streaming::after {
-        content: '▍'; animation: blink 1s steps(2) infinite;
-        color: var(--accent); margin-left: 2px;
-      }
+      .msg.bot.streaming::after { content: '▍'; animation: blink 1s steps(2) infinite; color: var(--accent); margin-left: 2px; }
       @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
       .agent .composer { display: flex; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--line); }
-      .agent .composer input {
-        flex: 1; background: #fff; border: 1px solid var(--line); color: var(--ink);
-        border-radius: 6px; padding: 10px 12px; font-size: 14px;
-      }
+      .agent .composer input { flex: 1; background: var(--bg); border: 1px solid var(--line); color: var(--ink); border-radius: 6px; padding: 10px 12px; font-size: 14px; }
       .agent .composer button { background: var(--accent); border: none; color: #fff; border-radius: 6px; padding: 10px 16px; cursor: pointer; font-weight: 600; }
       .empty { color: var(--ink-dim); }
-      /* Settings panel */
-      .settings-panel { flex: 1; overflow-y: auto; padding: 20px 28px; max-width: 720px; }
-      .settings-panel .section { margin-bottom: 26px; }
-      .settings-panel h2 { font-size: 15px; font-weight: 700; margin-bottom: 4px; }
-      .settings-panel .hint { font-size: 12.5px; color: var(--ink-dim); margin-bottom: 10px; }
-      .settings-panel .provider {
-        background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
-        padding: 12px 14px; margin-bottom: 12px;
+
+      /* ghostHR extension side panel — hosts the extension's OWN popup UI. */
+      .side-panel {
+        width: 380px; min-width: 320px; max-width: 480px; display: none;
+        flex-direction: column; background: var(--panel); border-left: 1px solid var(--line); min-height: 0;
       }
-      .settings-panel .provhead { display: flex; align-items: center; gap: 8px; font-weight: 600; margin-bottom: 4px; }
-      .settings-panel .field-label { display: block; font-size: 12px; color: var(--ink-dim); margin: 8px 0 3px; }
-      .settings-panel input[type="text"], .settings-panel input[type="password"], .settings-panel select {
-        width: 100%; background: var(--bg); border: 1px solid var(--line); color: var(--ink);
-        border-radius: 6px; padding: 8px 10px; font-size: 13px;
+      .side-panel.open { display: flex; }
+      .side-panel webview { border: 0; border-radius: 0; }
+      .side-panel .sp-head {
+        display: flex; align-items: center; gap: 8px; padding: 8px 12px;
+        border-bottom: 1px solid var(--line); font-size: 13px; font-weight: 600;
       }
-      .settings-actions { display: flex; gap: 10px; margin-top: 8px; }
-      .settings-actions button, .file-btn {
-        border-radius: 6px; padding: 10px 16px; cursor: pointer; font-weight: 600; font-size: 13px;
-      }
-      .settings-actions .primary { background: var(--accent); border: none; color: #fff; }
-      .settings-actions .ghost, .file-btn { background: var(--panel); border: 1px solid var(--line); color: var(--ink); }
-      #settings-status { margin-top: 10px; }
+      .side-panel .sp-head button { margin-left: auto; background: var(--bg); border: 1px solid var(--line); color: var(--ink); border-radius: 6px; padding: 4px 8px; cursor: pointer; }
     </style>
   </head>
   <body>
@@ -126,18 +105,21 @@
       <nav class="tabs">
         <button data-tab="agent" class="active">Agent</button>
         <button data-tab="browser">Browser</button>
-        <button data-tab="settings">Settings</button>
       </nav>
       <div id="urlbar" style="display:none">
         <input id="url-input" placeholder="Enter a job URL…" />
         <button id="go">Go</button>
         <button id="capture">Capture page</button>
       </div>
+      <div class="spacer"></div>
+      <button class="ext-btn" id="ext-toggle" title="Open ghostHR extension">🛠 ghostHR</button>
       <button class="theme-toggle" id="theme-toggle" title="Toggle dark/light theme">🌙</button>
     </header>
 
     <main>
       <section id="tab-agent" class="panel agent active">
+        <div class="agent-browser" id="agent-browser">
+        </div>
         <div class="chat-pane">
           <div class="chat" id="chat"></div>
           <div class="composer">
@@ -145,16 +127,17 @@
             <button id="agent-send">Send</button>
           </div>
         </div>
-        <div class="agent-browser" id="agent-browser" style="display:none">
-        </div>
       </section>
 
       <section id="tab-browser" class="panel browser" style="display:none">
       </section>
 
-      <section id="tab-settings" class="panel settings" style="display:none">
-        <div id="settings-root"></div>
-      </section>
+      <aside class="side-panel" id="ext-panel">
+        <div class="sp-head">
+          <span>🛠 ghostHR</span>
+          <button id="ext-close" title="Close">✕</button>
+        </div>
+      </aside>
     </main>
 
     <script type="module" src="./renderer.js"></script>
