@@ -10,7 +10,7 @@
  * electron-builder "files". In dev, run `npm run build` in the repo root first
  * so ../dist exists.
  */
-const { app, BrowserWindow, session, ipcMain } = require('electron')
+const { app, BrowserWindow, session, ipcMain, Tray, Menu, nativeImage } = require('electron')
 const path = require('node:path')
 const fs = require('node:fs')
 
@@ -25,6 +25,9 @@ const EXT_DIR = DEV
   : path.join(process.resourcesPath, 'dist')
 
 let mainWindow = null
+let loadedExtId = null
+let tray = null
+let isQuitting = false
 
 function resolveDist(p) {
   try {
@@ -44,6 +47,7 @@ async function loadGhostHrExtension() {
     // Extension must load into the SAME session the webview uses.
     const ext = await session.defaultSession.loadExtension(dir, { allowFileAccess: true })
     console.log('[ghostHR] Extension loaded:', ext.id)
+    loadedExtId = ext.id
     return ext
   } catch (e) {
     console.warn('[ghostHR] Extension load failed:', e?.message ?? e)
@@ -69,28 +73,63 @@ function createWindow() {
 
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'))
 
+  // Close (X) hides to the system tray instead of quitting, so the app stays
+  // resident and one tray click brings it back. True quit only happens via the
+  // tray menu / app.quit(), which sets isQuitting.
+  mainWindow.on('close', (e) => {
+    if (!isQuitting) {
+      e.preventDefault()
+      mainWindow.hide()
+    }
+  })
+
   mainWindow.on('closed', () => {
     mainWindow = null
   })
 }
 
+function createTray() {
+  const icon = nativeImage
+    .createFromPath(path.join(__dirname, 'build', 'icon.png'))
+    .resize({ width: 16, height: 16 })
+  tray = new Tray(icon)
+  tray.setToolTip('ghostHR')
+  tray.setContextMenu(Menu.buildFromTemplate([
+    { label: 'Open ghostHR', click: () => { showMainWindow() } },
+    { type: 'separator' },
+    { label: 'Quit', click: () => { isQuitting = true; app.quit() } },
+  ]))
+  // Clicking the tray icon opens the app.
+  tray.on('click', () => showMainWindow())
+}
+
+function showMainWindow() {
+  if (!mainWindow) { createWindow(); return }
+  mainWindow.show()
+  mainWindow.focus()
+}
+
 app.whenReady().then(async () => {
   await loadGhostHrExtension()
   createWindow()
+  createTray()
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    else showMainWindow()
   })
 })
 
+app.on('before-quit', () => { isQuitting = true })
+
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit()
+  // Keep running in the tray — do NOT quit when the window is closed.
 })
 
 // The Agent tab asks the main process for the current extension id so it can
 // address the loaded ghostHR extension if needed.
 ipcMain.handle('ghosthr:get-extension-id', () => {
-  return null
+  return loadedExtId
 })
 
 // ---------------------------------------------------------------------------
