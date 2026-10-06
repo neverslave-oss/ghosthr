@@ -274,7 +274,7 @@ export function usePopupStore() {
     // broken/hang-y. Models are fetched lazily on an explicit "Refresh models".
   }
 
-  return {
+  return reactive({
     tab, status, statusError, loading,
     settings, scan, scannedUrl, verdict, cv, cvFileName, cvKind, applications,
     modelChoices, modelLoading, recClass, cvShortName,
@@ -282,5 +282,5 @@ export function usePopupStore() {
     refreshSettings, scanPage, onCvFile, runVerdict, autofill, trackApplication,
     loadApplications, restoreScan, saveSettings, loadModelChoices, loadAllModelChoices,
     completeSetup, init,
-  }
+  })
 }
