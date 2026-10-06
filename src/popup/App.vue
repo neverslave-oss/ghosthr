@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { analyze, type ParsedCv, type Verdict } from '../ai/verdict'
 import { PROVIDER_CATALOG, PROVIDER_ORDER, type ProviderId } from '../ai/providers'
 import type { Settings } from '../ai/settings'
+import { getProviderModels, type ModelChoice } from '../ai/models'
 import type { PageScan, ScannedField } from '../ai/scanner'
 import { detectCvKind, blobToDataUrl, extractDocxText, type CvFileKind } from '../ai/cvocr'
 import { extractPdfText, rasterizePdf } from '../ai/pdftools'
@@ -208,8 +209,43 @@ async function saveSettings() {
 
 const provider = (pid: ProviderId) => settings.value?.providers.find((p) => p.id === pid)
 
+// Static fallback options (from the catalog) when dynamic fetch hasn't loaded.
+function staticModels(pid: ProviderId): ModelChoice[] {
+  return (PROVIDER_CATALOG[pid]?.models ?? []).map((id) => ({ id, suggested: false }))
+}
+
+// Dynamic model catalog (fetched once + cached), per provider.
+const modelChoices = ref<Record<ProviderId, ModelChoice[]>>({} as any)
+const modelLoading = ref(false)
+
+async function loadModelChoices(pid: ProviderId) {
+  const p = provider(pid)
+  if (!p || !p.baseUrl) return
+  modelLoading.value = true
+  try {
+    const choices = await getProviderModels({ provider: pid, baseUrl: p.baseUrl, apiKey: p.apiKey || undefined })
+    modelChoices.value[pid] = choices
+    // If nothing selected yet (or old default), preselect first suggested vision model.
+    const current = p.model
+    const suggested = choices.find((c) => c.suggested)
+    if (!current || !choices.some((c) => c.id === current)) {
+      if (suggested) p.model = suggested.id
+      else if (choices[0]) p.model = choices[0].id
+    }
+  } catch {
+    // fall back to catalog defaults (getProviderModels already does)
+  } finally {
+    modelLoading.value = false
+  }
+}
+
+async function loadAllModelChoices() {
+  await Promise.all(providerOrder.map((pid) => loadModelChoices(pid)))
+}
+
 onMounted(async () => {
   await Promise.all([loadApplications(), refreshSettings(), restoreScan()])
+  await loadAllModelChoices()
 })
 </script>
 
@@ -332,10 +368,15 @@ onMounted(async () => {
           <input type="text" v-model="provider(pid)!.baseUrl" placeholder="Base URL" />
           <label class="field-label">{{ PROVIDER_CATALOG[pid].keyLabel }}</label>
           <input type="password" v-model="provider(pid)!.apiKey" :placeholder="PROVIDER_CATALOG[pid].keyLabel" />
-          <label class="field-label">Model</label>
+          <label class="field-label">Model {{ modelLoading ? '(loading…)' : '' }}</label>
           <select v-model="provider(pid)!.model">
-            <option v-for="m in PROVIDER_CATALOG[pid].models" :key="m" :value="m">{{ m }}</option>
+            <option v-for="m in (modelChoices[pid]?.length ? modelChoices[pid] : staticModels(pid))"
+              :key="m.id" :value="m.id">
+              {{ m.id }}{{ m.suggested ? ' ★ recommended' : '' }}
+            </option>
           </select>
+          <button v-if="provider(pid)!.baseUrl" class="ghost small" style="margin-top:8px" @click="loadModelChoices(pid)">Refresh models</button>
+          <p class="hint" style="margin-top:6px">★ = recommended for ghostHR tasks. List fetches once and is cached.</p>
         </div>
       </section>
 

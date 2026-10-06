@@ -24,6 +24,13 @@ chrome.runtime.onInstalled.addListener(async () => {
   }
 })
 
+// Clear any stale badge when navigating to a fresh tab/page.
+chrome.tabs?.onUpdated?.addListener((_tabId, changeInfo) => {
+  if (changeInfo.status === 'loading') {
+    chrome.action.setBadgeText({ text: '' }).catch(() => {})
+  }
+})
+
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   handleMessage(msg)
     .then(sendResponse)
@@ -41,6 +48,18 @@ async function handleMessage(msg: any): Promise<any> {
   await openDb()
 
   switch (msg.type) {
+    case 'GHOSTHR_JOB_DETECTED': {
+      if (msg.detected) {
+        await chrome.action.setBadgeText({ text: '✓' })
+        await chrome.action.setBadgeBackgroundColor({ color: '#38bdf8' })
+        await chrome.action.setTitle({ title: 'ghostHR — Job advert detected' })
+      } else {
+        await chrome.action.setBadgeText({ text: '' })
+        await chrome.action.setTitle({ title: 'ghostHR' })
+      }
+      return { ok: true }
+    }
+
     case 'GHOSTHR_SCAN_PAGE': {
       const settings = await loadSettings()
 
