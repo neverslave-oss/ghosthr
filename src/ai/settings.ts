@@ -26,6 +26,8 @@ export interface Settings {
   cvModel: ProviderId
   /** Autofill scanned fields into the ATS page automatically. */
   autofillEnabled: boolean
+  /** True once the user has completed the first-run setup screen. */
+  setupDone: boolean
 }
 
 const STORAGE_KEY = 'ghosthr.settings'
@@ -42,6 +44,7 @@ export function defaultSettings(): Settings {
     scanModel: 'local',
     cvModel: 'local',
     autofillEnabled: true,
+    setupDone: false,
   }
 }
 
@@ -89,12 +92,22 @@ function mergeSettings(defaults: Settings, stored: Partial<Settings>): Settings 
     scanModel: (stored.scanModel as ProviderId) || defaults.scanModel,
     cvModel: (stored.cvModel as ProviderId) || defaults.cvModel,
     autofillEnabled: stored.autofillEnabled ?? defaults.autofillEnabled,
+    setupDone: stored.setupDone ?? defaults.setupDone,
   }
 }
 
 /** Resolve the enabled providers in configured order for a routing pass. */
 export function enabledProviders(settings: Settings) {
   return settings.providers
-    .filter((p) => p.enabled && p.baseUrl && p.model)
+    .filter((p) => {
+      if (!p.enabled || !p.baseUrl || !p.model) return false
+      // Cloud providers are unusable without a key; only `local` may run keyless.
+      return p.id === 'local' || Boolean(p.apiKey)
+    })
     .slice()
+}
+
+/** Whether any provider is actually usable (enabled + reachable config). */
+export function hasUsableProvider(settings: Settings): boolean {
+  return enabledProviders(settings).length > 0
 }

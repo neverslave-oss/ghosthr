@@ -9,6 +9,7 @@ import { computed, reactive, ref } from 'vue'
 import { analyze, type ParsedCv, type Verdict } from '../ai/verdict'
 import { PROVIDER_CATALOG, PROVIDER_ORDER, type ProviderId } from '../ai/providers'
 import type { Settings } from '../ai/settings'
+import { hasUsableProvider } from '../ai/settings'
 import { getProviderModels, type ModelChoice } from '../ai/models'
 import type { PageScan } from '../ai/scanner'
 import { detectCvKind, blobToDataUrl, extractDocxText, type CvFileKind } from '../ai/cvocr'
@@ -224,6 +225,20 @@ export function usePopupStore() {
     setStatus('Settings saved.')
   }
 
+  // ---------- First-run setup ----------
+  // True when the user hasn't completed setup yet OR no provider is usable.
+  const setupNeeded = computed(() => {
+    if (!settings.value) return true // settings not loaded yet -> show setup
+    return !settings.value.setupDone || !hasUsableProvider(settings.value)
+  })
+
+  async function completeSetup() {
+    if (!settings.value) return
+    settings.value.setupDone = true
+    await saveSettings()
+    setStatus('Setup complete.')
+  }
+
   // Static fallback options (from the catalog) when dynamic fetch hasn't loaded.
   function staticModels(pid: ProviderId): ModelChoice[] {
     return (PROVIDER_CATALOG[pid]?.models ?? []).map((id) => ({ id, suggested: false }))
@@ -263,8 +278,9 @@ export function usePopupStore() {
     tab, status, statusError, loading,
     settings, scan, scannedUrl, verdict, cv, cvFileName, cvKind, applications,
     modelChoices, modelLoading, recClass, cvShortName,
-    provider, staticModels,
+    provider, staticModels, hasUsableProvider,
     refreshSettings, scanPage, onCvFile, runVerdict, autofill, trackApplication,
-    loadApplications, restoreScan, saveSettings, loadModelChoices, loadAllModelChoices, init,
+    loadApplications, restoreScan, saveSettings, loadModelChoices, loadAllModelChoices,
+    setupNeeded, completeSetup, init,
   }
 }

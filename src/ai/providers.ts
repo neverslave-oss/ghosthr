@@ -108,7 +108,9 @@ export async function callLlm(opts: LlmCallOptions): Promise<LlmResult> {
       messages: opts.messages,
       max_tokens: opts.maxTokens ?? 2048,
     }),
-    signal: opts.signal,
+    // If the caller passed no abort signal, impose a strict default timeout so a
+    // dead baseUrl (e.g. no local Ollama) can never hang the scan forever.
+    signal: opts.signal ?? AbortSignal.timeout(20000),
   })
 
   if (!res.ok) {
