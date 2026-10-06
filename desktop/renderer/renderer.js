@@ -125,6 +125,56 @@ const chat = document.getElementById('chat')
 const agentInput = document.getElementById('agent-input')
 const agentSend = document.getElementById('agent-send')
 
+// Pull scan + CV + verdict through the extension bridge. Reuses the real
+// in-process TS engine (GHOSTHR_AGENT_CONTEXT -> verdict.analyze), so the Agent
+// tab coaches from the SAME engine as the popup's "Score my fit".
+async function pullAgentContext() {
+  if (!webview) throw new Error('No browser available')
+  await webview.executeJavaScript(
+    `document.documentElement.removeAttribute('data-ghosthr-agent');` +
+      `document.dispatchEvent(new CustomEvent('__ghosthr_agent_context')); true`,
+  )
+  let res = null
+  for (let i = 0; i < 30 && !res; i++) {
+    await new Promise((r) => setTimeout(r, 400))
+    const raw = await webview.executeJavaScript(
+      `document.documentElement.getAttribute('data-ghosthr-agent')`,
+    )
+    if (raw) {
+      try { res = JSON.parse(raw) } catch { res = null }
+    }
+  }
+  if (!res) throw new Error('ghostHR engine did not respond')
+  if (!res.ok) throw new Error(res.error || 'engine error')
+  return res
+}
+
+// Render the verdict into a short coaching reply.
+function formatCoaching(ctx) {
+  const s = ctx.scan
+  const v = ctx.verdict
+  const cv = ctx.cv
+  if (!s?.jobDescription || !cv) {
+    return 'I can only coach once I have both data points:\n\n• Scan a job first — go to the Browser tab, open a job page, and hit "Capture page" (or use the extension).\n• Upload your CV (Settings / scan in the extension).\n\nThen ask me again — e.g. "score my fit" or "should I apply?".'
+  }
+  const recLabel = { apply_now: '✅ Apply now', apply_with_caveats: '⚠️ Apply with caveats', hold_back: '🛑 Hold back' }[v.recommendation] || v.recommendation
+  let out = `${recLabel} — match ${v.match_score}/100\n`
+  out += `Job: ${s.jobTitle || '(untitled)'}${s.company ? ' · ' + s.company : ''}\n\n`
+  if (v.score_breakdown) {
+    out += `Skills ${v.score_breakdown.skills} · Experience ${v.score_breakdown.experience} · Fit ${v.score_breakdown.fit_signal}\n`
+  }
+  if (v.gap_analysis?.length) out += `\nGaps:\n• ` + v.gap_analysis.join('\n• ') + '\n'
+  if (v.hold_back_actions?.length) {
+    out += '\nTo improve your odds:\n'
+    for (const a of v.hold_back_actions) {
+      out += `• [${a.action}] ${a.detail} (~${a.est_effort_days}d)\n`
+    }
+  }
+  if (v.red_flags?.length) out += `\n⚠️ Red flags: ` + v.red_flags.join(', ') + '\n'
+  if (v.reasoning) out += '\n' + v.reasoning
+  return out
+}
+
 function addMsg(role, text) {
   const div = document.createElement('div')
   div.className = 'msg ' + role
@@ -140,6 +190,14 @@ function appendBot(text) {
 function handleAgent(text) {
   addMsg('user', text)
   const lower = text.toLowerCase()
+
+  // Coaching: ask for verdict / score / fit on the scanned job vs the CV.
+  if (/(verdict|score|fit|coach|advice|should i apply|would i)/.test(lower)) {
+    pullAgentContext()
+      .then((ctx) => appendBot(formatCoaching(ctx)))
+      .catch((e) => appendBot('⚠️ Could not reach the ghostHR engine: ' + (e && e.message)))
+    return
+  }
 
   // Open a URL in the browser tab when the user gives one.
   const urlMatch = text.match(/https?:\/\/[^\s]+/)

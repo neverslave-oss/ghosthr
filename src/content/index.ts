@@ -148,3 +148,20 @@ document.addEventListener('__ghosthr_scan_image', (ev) => {
     }
   })()
 })
+
+// Desktop Agent-tab bridge: same pattern as above but for the coaching context.
+// The renderer dispatches __ghosthr_agent_context (no payload needed) and we
+// write the scan + CV + verdict back onto <html data-ghosthr-agent>.
+document.addEventListener('__ghosthr_agent_context', () => {
+  void (async () => {
+    try {
+      const res = await chrome.runtime?.sendMessage?.({ type: 'GHOSTHR_AGENT_CONTEXT' })
+      document.documentElement?.setAttribute('data-ghosthr-agent', JSON.stringify(res))
+    } catch (err) {
+      document.documentElement?.setAttribute(
+        'data-ghosthr-agent',
+        JSON.stringify({ ok: false, error: String((err as Error)?.message ?? err) }),
+      )
+    }
+  })()
+})
