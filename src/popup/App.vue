@@ -5,6 +5,7 @@ import ScanView from './ScanView.vue'
 import TrackView from './TrackView.vue'
 import SettingsView from './SettingsView.vue'
 import SetupView from './SetupView.vue'
+import AgentView from './AgentView.vue'
 
 const s: PopupStore = usePopupStore()
 
@@ -30,6 +31,7 @@ onMounted(() => s.init())
 
     <nav class="tabbar">
       <button :class="{ active: s.tab === 'scan' }" @click="s.tab = 'scan'">Scan</button>
+      <button :class="{ active: s.tab === 'agent' }" @click="s.tab = 'agent'">Agent</button>
       <button :class="{ active: s.tab === 'track' }" @click="s.tab = 'track'">Tracked</button>
       <button :class="{ active: s.tab === 'settings' }" @click="s.tab = 'settings'">Settings</button>
     </nav>
@@ -38,6 +40,7 @@ onMounted(() => s.init())
     <SetupView v-if="s.setupNeeded" :store="s" :dismiss="s.completeSetup" />
 
     <ScanView v-if="s.tab === 'scan'" :store="s" />
+    <AgentView v-else-if="s.tab === 'agent'" :store="s" />
     <TrackView v-else-if="s.tab === 'track'" :store="s" />
     <SettingsView v-else-if="s.tab === 'settings'" :store="s" />
 
