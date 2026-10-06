@@ -36,7 +36,9 @@ function switchTab(name) {
   tabButtons.forEach((b) => b.classList.toggle('active', b.dataset.tab === name))
   document.getElementById('tab-agent').classList.toggle('active', name === 'agent')
   document.getElementById('tab-browser').classList.toggle('active', name === 'browser')
-  urlBar.style.display = name === 'browser' ? 'flex' : 'none'
+  // The browser toolbar (url bar + pinned ghostHR action + capture) is the
+  // desktop's browser chrome — it stays visible so the extension is reachable
+  // like a real browser regardless of which view is active.
   if (name === 'browser') mountWebview(browserHost)
   else if (name === 'agent') mountWebview(agentBrowserHost)
 }
@@ -75,17 +77,21 @@ async function ensureExtPanel() {
 
 extToggle.addEventListener('click', async () => {
   await ensureExtPanel()
-  extPanel.classList.toggle('open')
-  extToggle.textContent = extPanel.classList.contains('open') ? '✕ ghostHR' : '🛠 ghostHR'
+  const open = extPanel.classList.toggle('open')
+  extToggle.classList.toggle('active', open)
 })
 extClose.addEventListener('click', () => {
   extPanel.classList.remove('open')
-  extToggle.textContent = '🛠 ghostHR'
+  extToggle.classList.remove('active')
 })
 
 // ---------- Browser ----------
 const urlInput = document.getElementById('url-input')
 const goBtn = document.getElementById('go')
+
+// Browser chrome: the ghostHR action icon (pinned like a real browser)
+// lives in the toolbar. The Browser panel IS the primary browsing surface;
+// the extension's side panel is surfaced from there, not an app-header hack.
 
 function navigate(url) {
   let u = url.trim()
