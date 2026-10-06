@@ -101,3 +101,16 @@ chrome.runtime?.onMessage?.addListener((msg, _sender, sendResponse) => {
   }
   return true
 })
+
+// Auto-detect on load and ping the background to show the toolbar badge when a
+// job advert is present on the page.
+;(async () => {
+  try {
+    const form = detectAndReport()
+    if (form) {
+      chrome.runtime?.sendMessage?.({ type: 'GHOSTHR_JOB_DETECTED', detected: true })
+    }
+  } catch {
+    /* badge is best-effort */
+  }
+})()
