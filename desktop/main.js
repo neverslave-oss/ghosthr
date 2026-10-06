@@ -56,6 +56,8 @@ function createWindow() {
     width: 1280,
     height: 860,
     title: 'ghostHR',
+    // Same icon as the extension (single-icon identity).
+    icon: path.join(__dirname, 'build', 'icon.png'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -158,21 +160,49 @@ ipcMain.handle('ghosthr:agent-turn', async (_evt, payload) => {
       })
     }
 
-    // 4. Run the agent turn.
+    // 4. Run the agent turn, streaming assistant tokens live to the renderer.
+    // streamMode 'messages' yields [messageChunk, metadata] tuples with
+    // per-token deltas; 'values' gives the full latest state (used as a
+    // robust fallback if a provider/agent doesn't emit message chunks).
+    const sender = _evt.sender
+    const emit = (delta) => {
+      try { sender.send('ghosthr:agent-chunk', { delta }) } catch { /* window closed */ }
+    }
     const final = await deepAgent.agent.stream(
       { messages: [{ role: 'user', content: message }] },
-      { streamMode: 'values' },
+      { streamMode: ['values', 'messages'] },
     )
     let lastText = ''
     for await (const chunk of final) {
+      // 'messages' mode: [messageChunk, metadata]
+      if (Array.isArray(chunk) && chunk[0]) {
+        const meta = chunk[1] || {}
+        if (meta.langgraph_node === 'agent') {
+          const d = chunk[0].content
+          if (typeof d === 'string' && d) emit(d)
+        }
+        continue
+      }
+      // 'values' fallback: diff the latest assistant message content.
       const msgs = chunk?.values?.messages
       if (!Array.isArray(msgs) || !msgs.length) continue
       const last = msgs[msgs.length - 1]
-      const c = typeof last?.content === 'string' ? last.content : ''
-      if (last?.role === 'assistant' && c) lastText = c
+      if (last?.role === 'assistant' && typeof last.content === 'string') {
+        const delta = lastText.length ? last.content.slice(lastText.length) : last.content
+        lastText = last.content
+        if (delta) emit(delta)
+      }
     }
+    // Signal completion so the renderer finalizes the streaming bubble.
+    try {
+      sender.send('ghosthr:agent-done', {
+        ok: true,
+        model: deepAgent.modelUsed?.modelName || '',
+        tools: deepAgent.tools,
+      })
+    } catch { /* window closed */ }
 
-    return { ok: true, reply: lastText, model: deepAgent.modelUsed?.modelName || '', tools: deepAgent.tools }
+    return { ok: true, model: deepAgent.modelUsed?.modelName || '', tools: deepAgent.tools }
   } catch (e) {
     return { ok: false, error: String(e?.message ?? e) }
   }

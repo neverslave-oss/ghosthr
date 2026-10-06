@@ -186,6 +186,24 @@ function addMsg(role, text) {
   div.textContent = text
   chat.appendChild(div)
   chat.scrollTop = chat.scrollHeight
+  return div
+}
+
+// Create an empty bot bubble for live streamed text. Returns {node, set} where
+// set(text) replaces the content (preserving whitespace/multiline).
+function addStreamBubble() {
+  const div = document.createElement('div')
+  div.className = 'msg bot streaming'
+  div.textContent = ''
+  chat.appendChild(div)
+  chat.scrollTop = chat.scrollHeight
+  return {
+    node: div,
+    set(text) {
+      div.textContent = text
+      chat.scrollTop = chat.scrollHeight
+    },
+  }
 }
 
 function appendBot(text) {
@@ -198,33 +216,53 @@ function appendBot(text) {
 async function runDeepTurn(text, isCoaching) {
   // The deep agent needs the scan/CV/apps/settings context refreshed first so
   // main can read it on this turn.
+  let ctxErr = null
   try {
     await pullAgentContext()
-  } catch { /* best-effort; the agent will report missing data itself */ }
+  } catch (e) { ctxErr = e }
 
-  addMsg('bot', '🤔 Thinking…')
+  const bubble = addStreamBubble()
+  bubble.set('…')
+  let gotStream = false
+  const offChunk = (window.ghosthr && window.ghosthr.onAgentChunk)
+    ? window.ghosthr.onAgentChunk((p) => { gotStream = true; bubble.set(bubble.node.textContent + (p?.delta || '')) })
+    : null
+  const offDone = (window.ghosthr && window.ghosthr.onAgentDone)
+    ? window.ghosthr.onAgentDone((p) => {
+        try {
+          if (!gotStream) bubble.set('')
+          bubble.node.classList.remove('streaming')
+        } catch { /* bubble already replaced */ }
+      })
+    : null
+
   try {
     const res = window.ghosthr && await window.ghosthr.agentTurn(text)
-    if (res && res.ok && res.reply) {
-      chat.removeChild(chat.lastChild)
-      appendBot(res.reply)
+    if (res && res.ok) {
+      // Done event (or stream) finalized the bubble. If nothing streamed
+      // (agent didn't emit chunks), fall back to offline coaching.
+      if (!gotStream && isCoaching) {
+        try { bubble.set(formatCoaching(await pullAgentContext())) } catch { bubble.set('⚠️ Could not reach the ghostHR engine.') }
+      }
       return
     }
-    chat.removeChild(chat.lastChild)
+    // Not ok: fall back.
     if (isCoaching) {
-      const ctx = await pullAgentContext()
-      appendBot(formatCoaching(ctx))
-      return
-    }
-    const err = (res && res.error) || 'no reply from agent'
-    appendBot('⚠️ Deep agent unavailable (' + err + '). Try "score my fit" for offline coaching.')
-  } catch (e) {
-    chat.removeChild(chat.lastChild)
-    if (isCoaching) {
-      try { appendBot(formatCoaching(await pullAgentContext())) } catch { appendBot('⚠️ Could not reach the ghostHR engine.') }
+      try { bubble.set(formatCoaching(await pullAgentContext())) } catch { bubble.set('⚠️ Could not reach the ghostHR engine.') }
     } else {
-      appendBot('⚠️ Agent error: ' + (e && e.message))
+      const err = (res && res.error) || 'no reply from agent'
+      bubble.set('⚠️ Deep agent unavailable (' + err + '). Try "score my fit" for offline coaching.')
     }
+  } catch (e) {
+    if (isCoaching) {
+      try { bubble.set(formatCoaching(await pullAgentContext())) } catch { bubble.set('⚠️ Could not reach the ghostHR engine.') }
+    } else {
+      bubble.set('⚠️ Agent error: ' + (e && e.message))
+    }
+  } finally {
+    if (offChunk) offChunk()
+    if (offDone) offDone()
+    bubble.node.classList.remove('streaming')
   }
 }
 
