@@ -1,5 +1,39 @@
 import { describe, expect, it } from 'vitest'
-import { parseScanJson, type PageScan } from '../src/ai/scanner'
+import { parseScanJson, localDetectedToScan, type PageScan } from '../src/ai/scanner'
+
+describe('localDetectedToScan', () => {
+  it('converts offline DOM detection into a PageScan (no LLM)', () => {
+    const scan = localDetectedToScan({
+      provider: 'workable',
+      descriptionText: 'We are looking for a stellar engineer.',
+      fields: [
+        { kind: 'input', name: 'first_name', label: 'First name', required: true },
+        { kind: 'input', name: 'email', label: 'Email', required: true },
+        { kind: 'textarea', name: 'cover', label: 'Cover letter', required: false },
+      ],
+    })
+    expect(scan.jobDescription).toContain('stellar engineer')
+    expect(scan.fields).toHaveLength(3)
+    expect(scan.fields[0].label).toBe('First name')
+    expect(scan.fields[0].required).toBe(true)
+    expect(scan.fields[2].kind).toBe('textarea')
+  })
+
+  it('falls back to name/placeholder for label and coerces kinds', () => {
+    const scan = localDetectedToScan({
+      provider: 'generic',
+      descriptionText: '',
+      fields: [
+        { kind: 'SELECT', name: 'country' },
+        { kind: 'checkbox', label: 'Agree', required: true },
+      ],
+    })
+    expect(scan.fields[0].label).toBe('country')
+    expect(scan.fields[0].kind).toBe('select')
+    expect(scan.fields[1].kind).toBe('checkbox')
+    expect(scan.fields[1].required).toBe(true)
+  })
+})
 
 describe('parseScanJson', () => {
   it('parses a clean JSON response', () => {
