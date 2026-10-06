@@ -13,7 +13,7 @@ import { openDb, addApplication, listApplications, getLatestCvProfile, upsertCvP
 import { loadSettings, saveSettings } from './ai/settings'
 import { scanPage, localDetectedToScan, type PageScan } from './ai/scanner'
 import { parseCv, type CvParseInput } from './ai/cvocr'
-import type { ParsedCv } from './ai/verdict'
+import { analyze, type ParsedCv } from './ai/verdict'
 import type { DetectedForm } from './content/ats'
 
 chrome.runtime.onInstalled.addListener(async () => {
@@ -152,6 +152,25 @@ async function handleMessage(msg: any): Promise<any> {
         JSON.stringify(cv),
       )
       return { ok: true, id, cv }
+    }
+
+    case 'GHOSTHR_AGENT_CONTEXT': {
+      // Backend for the desktop Agent tab (reuses the existing in-process TS
+      // AI layer — no separate service, one installer, no Python). Bundles the
+      // current scan + latest CV, and computes the REAL verdict via
+      // verdict.analyze() so the Agent chat coaches from the same engine as
+      // the popup's "Score my fit". Returns nulls when not yet available so
+      // the Agent chat can message the user to scan/upload first.
+      const scan = (await getCurrentScan()) as PageScan | null
+      const profile = await getLatestCvProfile()
+      let cv: ParsedCv | null = null
+      if (profile?.parsed_json) {
+        try { cv = JSON.parse(profile.parsed_json) } catch { cv = null }
+      }
+      const verdict = scan?.jobDescription && cv
+        ? analyze({ jobText: scan.jobDescription, cv })
+        : null
+      return { ok: true, scan, cv, verdict }
     }
 
     case 'GHOSTHR_ADD_APPLICATION': {
