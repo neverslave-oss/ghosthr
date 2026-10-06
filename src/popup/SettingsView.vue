@@ -10,26 +10,31 @@ const s = props.store
   <main v-if="s.settings">
     <section class="section">
       <h2><span>AI providers</span></h2>
-      <div v-for="pid in providerOrder" :key="pid" class="provider" v-if="s.provider(pid)">
-        <label class="provhead">
-          <input type="checkbox" v-model="s.provider(pid)!.enabled" />
-          <b>{{ PROVIDER_CATALOG[pid].label }}</b>
-        </label>
-        <p class="hint">{{ PROVIDER_CATALOG[pid].description }}</p>
-        <label class="field-label">Base URL</label>
-        <input type="text" v-model="s.provider(pid)!.baseUrl" placeholder="Base URL" />
-        <label class="field-label">{{ PROVIDER_CATALOG[pid].keyLabel }}</label>
-        <input type="password" v-model="s.provider(pid)!.apiKey" :placeholder="PROVIDER_CATALOG[pid].keyLabel" />
-        <label class="field-label">Model {{ s.modelLoading ? '(loading…)' : '' }}</label>
-        <select v-model="s.provider(pid)!.model">
-          <option v-for="m in (s.modelChoices[pid]?.length ? s.modelChoices[pid] : s.staticModels(pid))"
-            :key="m.id" :value="m.id">
-            {{ m.id }}{{ m.suggested ? ' ★ recommended' : '' }}
-          </option>
-        </select>
-        <button v-if="s.provider(pid)!.baseUrl" class="ghost small" style="margin-top:8px" @click="s.loadModelChoices(pid)">Refresh models</button>
-        <p class="hint" style="margin-top:6px">★ = recommended for ghostHR tasks. List fetches once and is cached.</p>
-      </div>
+      <!-- NOTE: v-if and v-for CANNOT be on the same element — v-if has higher
+           precedence, so pid is out of scope and every card would be skipped.
+           Use a <template v-for> wrapper with the v-if inside. -->
+      <template v-for="pid in providerOrder" :key="pid">
+        <div class="provider" v-if="s.provider(pid)">
+          <label class="provhead">
+            <input type="checkbox" v-model="s.provider(pid)!.enabled" />
+            <b>{{ PROVIDER_CATALOG[pid].label }}</b>
+          </label>
+          <p class="hint">{{ PROVIDER_CATALOG[pid].description }}</p>
+          <label class="field-label">Base URL</label>
+          <input type="text" v-model="s.provider(pid)!.baseUrl" placeholder="Base URL" />
+          <label class="field-label">{{ PROVIDER_CATALOG[pid].keyLabel }}</label>
+          <input type="password" v-model="s.provider(pid)!.apiKey" :placeholder="PROVIDER_CATALOG[pid].keyLabel" />
+          <label class="field-label">Model {{ s.modelLoading ? '(loading…)' : '' }}</label>
+          <select v-model="s.provider(pid)!.model">
+            <option v-for="m in (s.modelChoices[pid]?.length ? s.modelChoices[pid] : s.staticModels(pid))"
+              :key="m.id" :value="m.id">
+              {{ m.id }}{{ m.suggested ? ' ★ recommended' : '' }}
+            </option>
+          </select>
+          <button v-if="s.provider(pid)!.baseUrl" class="ghost small" style="margin-top:8px" @click="s.loadModelChoices(pid)">Refresh models</button>
+          <p class="hint" style="margin-top:6px">★ = recommended for ghostHR tasks. List fetches once and is cached.</p>
+        </div>
+      </template>
     </section>
 
     <section class="section">
