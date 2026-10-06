@@ -226,10 +226,12 @@ export function usePopupStore() {
   }
 
   // ---------- First-run setup ----------
-  // True when the user hasn't completed setup yet OR no provider is usable.
+  // Show onboarding once (until setupDone). It must NOT depend on whether a
+  // provider is usable — otherwise a user with no provider configured yet
+  // would be locked out of the whole app and never reach Settings.
   const setupNeeded = computed(() => {
     if (!settings.value) return true // settings not loaded yet -> show setup
-    return !settings.value.setupDone || !hasUsableProvider(settings.value)
+    return !settings.value.setupDone
   })
 
   // Reactive boolean (reacts to setting/provider edits) — unlike the raw
@@ -240,13 +242,12 @@ export function usePopupStore() {
 
   async function completeSetup() {
     if (!settings.value) return
-    if (!hasUsableProvider(settings.value)) {
-      setStatus('Enable a provider and add your API key + model first.', true)
-      return
-    }
+    // Always allow completing onboarding. We never block on a usable provider,
+    // so Continue always unlocks the app and the user can set up a provider
+    // later from the Settings tab.
     settings.value.setupDone = true
     await saveSettings()
-    setStatus('Setup complete.')
+    setStatus('Setup complete — you can configure a provider anytime in Settings.')
   }
 
   // Static fallback options (from the catalog) when dynamic fetch hasn't loaded.

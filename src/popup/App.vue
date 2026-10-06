@@ -31,12 +31,12 @@ onMounted(() => s.init())
       <button :class="{ active: s.tab === 'settings' }" @click="s.tab = 'settings'">Settings</button>
     </nav>
 
-    <SetupView v-if="s.setupNeeded" :store="s" />
-    <template v-else>
-      <ScanView v-if="s.tab === 'scan'" :store="s" />
-      <TrackView v-else-if="s.tab === 'track'" :store="s" />
-      <SettingsView v-else-if="s.tab === 'settings'" :store="s" />
-    </template>
+    <!-- Non-blocking onboarding: tabs stay usable, setup is skippable. -->
+    <SetupView v-if="s.setupNeeded" :store="s" :dismiss="s.completeSetup" />
+
+    <ScanView v-if="s.tab === 'scan'" :store="s" />
+    <TrackView v-else-if="s.tab === 'track'" :store="s" />
+    <SettingsView v-else-if="s.tab === 'settings'" :store="s" />
 
     <div v-if="s.status" class="statusbar" :class="{ error: s.statusError }">{{ s.status }}</div>
   </div>
