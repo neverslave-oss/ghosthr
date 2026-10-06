@@ -8,7 +8,7 @@
 import { computed, reactive, ref } from 'vue'
 import { analyze, type ParsedCv, type Verdict } from '../ai/verdict'
 import { PROVIDER_CATALOG, PROVIDER_ORDER, type ProviderId } from '../ai/providers'
-import type { Settings } from '../ai/settings'
+import { hasUsableProvider, type Settings } from '../ai/settings'
 import { getProviderModels, type ModelChoice } from '../ai/models'
 import type { PageScan } from '../ai/scanner'
 import { detectCvKind, blobToDataUrl, extractDocxText, type CvFileKind } from '../ai/cvocr'
@@ -225,9 +225,30 @@ export function usePopupStore() {
   }
 
   // ---------- First-run setup ----------
-  // Onboarding removed entirely — the app opens straight to the tabs and
-  // providers are configured from the Settings tab.
-  async function completeSetup() {}
+  // Non-blocking onboarding: shows once (until setupDone). Must NOT gate on a
+  // usable provider, or a user with none configured would be locked out of the
+  // whole app and never reach Settings.
+  const setupNeeded = computed(() => {
+    if (!settings.value) return true // settings not loaded yet -> show setup
+    return !settings.value.setupDone
+  })
+
+  // Reactive boolean (reacts to setting/provider edits) — unlike the raw
+  // function we must NOT expose to templates, where it would always be truthy.
+  const hasUsable = computed(() =>
+    settings.value ? hasUsableProvider(settings.value) : false,
+  )
+
+  async function completeSetup() {
+    if (!settings.value) return
+    // Always allow completing onboarding. We never block on a usable provider,
+    // so Continue always unlocks the app and the user can set up a provider
+    // later from the Settings tab.
+    settings.value.setupDone = true
+    await saveSettings()
+    tab.value = 'scan'
+    setStatus('Setup complete — you can configure a provider anytime in Settings.')
+  }
 
   // Static fallback options (from the catalog) when dynamic fetch hasn't loaded.
   function staticModels(pid: ProviderId): ModelChoice[] {
@@ -286,6 +307,8 @@ export function usePopupStore() {
     }
   }
 
+  let autoScanDone = false
+
   async function init() {
     await Promise.all([loadApplications(), refreshSettings(), restoreScan(), restoreCv()])
     // NOTE: intentionally do NOT auto-fetch provider model lists on open.
@@ -294,15 +317,29 @@ export function usePopupStore() {
     // provider's /models endpoint on every panel open (e.g. localhost:11434
     // connection-refused when Ollama wasn't running), which made the app feel
     // broken/hang-y. Models are fetched lazily on an explicit "Refresh models".
+    //
+    // Auto-scan the active page ONCE:
+    //  - only after onboarding is completed (setupDone), so the welcome screen
+    //    owns first-run
+    //  - only when a provider is actually usable (has a key/baseUrl/model)
+    //  - fire-and-forget: never blocks init, never hangs the panel
+    if (!settings.value?.setupDone) return
+    if (!hasUsableProvider(settings.value)) return
+    if (autoScanDone) return
+    autoScanDone = true
+    // run outside the awaited init so the panel mounts immediately
+    setTimeout(() => {
+      scanPage().catch(() => {})
+    }, 0)
   }
 
   return reactive({
     tab, status, statusError, loading,
     settings, scan, scannedUrl, verdict, cv, cvFileName, cvKind, applications,
     modelChoices, modelLoading, recClass, cvShortName,
-    provider, staticModels,
+    provider, staticModels, hasUsable,
     refreshSettings, scanPage, onCvFile, runVerdict, autofill, trackApplication,
     loadApplications, restoreScan, saveSettings, loadModelChoices, loadAllModelChoices,
-    completeSetup, init,
+    setupNeeded, completeSetup, init,
   })
 }
