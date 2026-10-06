@@ -47,6 +47,27 @@ urlInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') navigate(urlInput.value)
 })
 
+// Screen capture at the ELECTRON layer — fully supported.
+// The extension's own vision-scan uses chrome.tabs.captureVisibleTab, which
+// Electron does NOT implement; but <webview>.capturePage() works and returns
+// the page as a PNG, so desktop capture never needs the extension API.
+const captureBtn = document.getElementById('capture')
+if (captureBtn && webview) {
+  captureBtn.addEventListener('click', async () => {
+    try {
+      const image = await webview.capturePage()
+      const dataUrl = image.toDataURL()
+      // TODO(next phase): hand this PNG to the vision scan / backend.
+      const pre = document.createElement('a')
+      pre.href = dataUrl
+      pre.download = 'ghosthr-page.png'
+      pre.click()
+    } catch (e) {
+      console.error('[ghostHR] capture failed:', e)
+    }
+  })
+}
+
 // Keep the URL bar in sync as the user browses.
 if (webview) {
   webview.addEventListener('did-navigate', (e) => {
