@@ -2,7 +2,7 @@
 import { providerOrder, type PopupStore } from './store'
 import { PROVIDER_CATALOG } from '../ai/providers'
 
-const props = defineProps<{ store: PopupStore }>()
+const props = defineProps<{ store: PopupStore; dismiss: () => void }>()
 const s = props.store
 </script>
 
@@ -37,12 +37,11 @@ const s = props.store
         </template>
       </div>
 
-      <button class="primary" :disabled="!s.settings || !s.hasUsable" @click="s.completeSetup">
-        Continue
-      </button>
+      <button class="primary" @click="dismiss">Continue</button>
       <p class="hint" style="margin-top:8px">
-        {{ s.hasUsable ? 'Great — a usable provider is configured.' : 'Enable a provider and add a key/model to continue.' }}
+        {{ s.hasUsable ? 'Great — a usable provider is configured.' : 'No provider configured yet — you can add one anytime in Settings.' }}
       </p>
+      <button class="ghost small" style="margin-top:10px" @click="dismiss">Skip for now</button>
     </section>
   </main>
 </template>
