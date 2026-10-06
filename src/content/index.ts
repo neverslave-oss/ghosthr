@@ -165,3 +165,33 @@ document.addEventListener('__ghosthr_agent_context', () => {
     }
   })()
 })
+
+// ---------------------------------------------------------------------------
+// Desktop generic bridge.
+//
+// The desktop Settings panel (and CV upload) need to call the extension's own
+// background handlers (GHOSTHR_GET_SETTINGS / GHOSTHR_SAVE_SETTINGS /
+// GHOSTHR_GET_CV / GHOSTHR_PARSE_CV ...) so the DESKTOP writes the SAME
+// chrome.storage.local the standalone browser extension uses. The renderer
+// can't reach chrome.runtime directly, so it dispatches a CustomEvent here and
+// we relay the { type, payload } to the background and write the reply to a
+// <html> attribute the renderer polls — exactly like the scan/agent bridges.
+document.addEventListener('__ghosthr_bridge', (ev) => {
+  const d = (ev as CustomEvent).detail as { type?: string; payload?: any } | undefined
+  const type = d?.type
+  if (typeof type !== 'string' || !type) return
+  void (async () => {
+    try {
+      const res = await chrome.runtime?.sendMessage?.({ type, ...(d?.payload ?? {}) })
+      document.documentElement?.setAttribute(
+        'data-ghosthr-bridge',
+        JSON.stringify({ ok: true, res }),
+      )
+    } catch (err) {
+      document.documentElement?.setAttribute(
+        'data-ghosthr-bridge',
+        JSON.stringify({ ok: false, error: String((err as Error)?.message ?? err) }),
+      )
+    }
+  })()
+})
