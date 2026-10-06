@@ -94,6 +94,25 @@ function detectRedFlags(jobText: string): string[] {
   return GHOST_SIGNALS.filter((s) => lower.includes(s))
 }
 
+/** Which known skills the job listing actually asks for. */
+function jobRequiredSkills(jobText: string): string[] {
+  const lower = jobText.toLowerCase()
+  return COMMON_SKILLS.filter((s) => lower.includes(s))
+}
+
+/**
+ * Job-required skills the candidate does NOT list — the real, concrete gap.
+ * Uses the full skill name (so "React" isn't a false gap just because the CV
+ * says "React Native", and "machine learning" matches a "ML"-style subset).
+ */
+function missingRequiredSkills(jobText: string, cvSkills: string[]): string[] {
+  const cvNorm = cvSkills.map((s) => s.toLowerCase().trim())
+  return jobRequiredSkills(jobText).filter((s) => {
+    // Covered if the CV lists it directly or embeds it in a broader skill.
+    return !cvNorm.some((k) => k === s || k.includes(s) || s.includes(k))
+  })
+}
+
 /**
  * Produce a verdict from a job + CV. Pure function, no I/O.
  */
@@ -117,7 +136,8 @@ export function analyze(input: AnalyzeInput): Verdict {
   const matchScore = Math.round(skillsScore * 0.6 + expScore * 0.25 + fitSignal * 0.15)
 
   const gap = buildGapAnalysis(input.cv)
-  const actions = buildHoldBackActions(input.jobText, input.cv, skillsScore, gap)
+  const missingSkills = missingRequiredSkills(input.jobText, input.cv.skills)
+  const actions = buildHoldBackActions(input.jobText, input.cv, skillsScore, gap, missingSkills)
 
   let recommendation: Recommendation
   if (redFlags.length >= 3) {
@@ -132,10 +152,13 @@ export function analyze(input: AnalyzeInput): Verdict {
 
   const reasoning = [
     `Skills overlap: ${present.length}/${input.cv.skills.length} (${skillsScore}%).`,
+    missingSkills.length
+      ? `Missing for this role: ${missingSkills.slice(0, 5).join(', ')}.`
+      : '',
     redFlags.length
       ? `Detected ${redFlags.length} ghost-job signal(s).`
       : 'No clear ghost-job signals in listing.',
-  ].join(' ')
+  ].filter(Boolean).join(' ')
 
   return {
     recommendation,
@@ -178,13 +201,22 @@ function buildHoldBackActions(
   cv: ParsedCv,
   skillsScore: number,
   gaps: string[],
+  missingSkills: string[],
 ): HoldBackAction[] {
   const actions: HoldBackAction[] = []
   if (skillsScore < 70) {
+    // Data-driven: point at the ACTUAL skills the job asks for that the CV
+    // lacks (jobRequiredSkills ∩ ~CV). Effort scales with how many are missing.
+    const targets = missingSkills.length
+      ? missingSkills.slice(0, 3).join(', ')
+      : cv.skills.join(', ') || 'core'
+    const effort = missingSkills.length >= 3 ? 10 : missingSkills.length === 2 ? 6 : 4
     actions.push({
       action: 'study',
-      detail: `Strengthen the ${cv.skills.join(', ') || 'core'} skills that the role emphasizes before applying.`,
-      est_effort_days: 7,
+      detail: missingSkills.length
+        ? `The role emphasizes ${targets} — not on your CV yet. Plan focused work to close at least the top gap before applying.`
+        : `Strengthen ${targets} skills that the role emphasizes before applying.`,
+      est_effort_days: effort,
     })
   }
   if (!cv.projects?.length) {
