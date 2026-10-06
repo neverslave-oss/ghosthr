@@ -4,6 +4,7 @@ import {
   detectProvider,
   extractJobDescription,
   looksLikeApplicationForm,
+  looksLikeJobAdvert,
   mapFieldName,
   normalizeText,
   type AthFormField,
@@ -65,16 +66,28 @@ describe('mapFieldName', () => {
 })
 
 describe('buildDetectedForm', () => {
-  it('assembles provider, description, fields', () => {
+  it('assembles provider, description, fields, applyUrl', () => {
     const form = buildDetectedForm({
       url: 'https://apply.workable.com/acme/j/A1/',
       bodyText: 'Job description here with many details. ' + '\nFirst name\nLast name',
       fields: workableFields,
       firstFieldIndex: 20,
+      applyUrl: 'https://apply.workable.com/acme/j/A1/apply/',
     })
     expect(form.provider).toBe('workable')
     expect(form.fields.length).toBe(4)
     expect(form.descriptionText.length).toBeGreaterThan(0)
+    expect(form.applyUrl).toContain('/apply/')
+  })
+})
+
+describe('looksLikeJobAdvert', () => {
+  it('true for job-overview/description text', () => {
+    expect(looksLikeJobAdvert('Senior ML Engineer - Remote. We are looking for a stellar candidate.')).toBe(true)
+    expect(looksLikeJobAdvert('Apply for this job • About the role • Requirements')).toBe(true)
+  })
+  it('false for unrelated text', () => {
+    expect(looksLikeJobAdvert('Cookies policy and privacy notice.')).toBe(false)
   })
 })
 

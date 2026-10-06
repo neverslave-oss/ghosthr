@@ -10,11 +10,20 @@
 import {
   buildDetectedForm,
   looksLikeApplicationForm,
+  looksLikeJobAdvert,
   type AthFormField,
   type DetectedForm,
 } from './ats'
 import { fillField, cvValueBag } from './autofill'
 import type { ParsedCv } from '../ai/verdict'
+
+/** Derive a Workable-style apply URL from a job-overview URL (…/j/<id>/ → …/j/<id>/apply/). */
+export function deriveApplyUrl(url: string): string | null {
+  if (/apply\.workable\.com\//i.test(url) && /\/j\/[^/]+\/?$/i.test(url)) {
+    return url.replace(/\/?$/, '/apply/')
+  }
+  return null
+}
 
 function collectFields(): AthFormField[] {
   const fields: AthFormField[] = []
@@ -62,12 +71,15 @@ function detectAndReport(): DetectedForm | null {
     return idx.length ? Math.max(0, Math.min(...idx)) : 0
   })()
 
-  const form = buildDetectedForm({ url: location.href, bodyText, fields, firstFieldIndex: firstFieldIdx })
+  const applyUrl = deriveApplyUrl(location.href)
+  const form = buildDetectedForm({ url: location.href, bodyText, fields, firstFieldIndex: firstFieldIdx, applyUrl })
 
-  if (!looksLikeApplicationForm(form.fields, bodyText)) {
-    return null
+  // Application form page (has prefillable fields) OR a job-advert overview page
+  // whose form lives on a separate apply URL. Both are "job adverts detected".
+  if (looksLikeApplicationForm(form.fields, bodyText) || looksLikeJobAdvert(bodyText)) {
+    return form
   }
-  return form
+  return null
 }
 
 // Run once (document_idle) and stash result for the popup.

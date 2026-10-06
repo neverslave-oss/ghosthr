@@ -27,6 +27,8 @@ export interface PageScan {
   company: string
   jobDescription: string
   fields: ScannedField[]
+  /** URL of the actual application form when this is an overview/description page. */
+  applyUrl?: string | null
 }
 
 const SCAN_SYSTEM = `You are a ghostHR page scanner. You receive a full-page screenshot of a job
@@ -116,6 +118,7 @@ export function parseScanJson(text: string): PageScan {
     company: String(obj.company ?? ''),
     jobDescription: String(obj.jobDescription ?? ''),
     fields,
+    applyUrl: undefined,
   }
 }
 
@@ -141,6 +144,8 @@ export interface LocalDetectedForm {
     placeholder?: string | null
     required?: boolean
   }>
+  /** URL of the actual application form when this is an overview/description page. */
+  applyUrl?: string | null
 }
 
 /**
@@ -160,5 +165,6 @@ export function localDetectedToScan(form: LocalDetectedForm): PageScan {
     company: '',
     jobDescription: form.descriptionText ?? '',
     fields,
+    applyUrl: form.applyUrl || null,
   }
 }
