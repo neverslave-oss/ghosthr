@@ -310,6 +310,35 @@ agentInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') send()
 })
 
+// ---------- Theme toggle (dark/light) ----------
+// Default is light (the desktop's built-in light palette). The user's choice
+// is persisted in localStorage so it survives a relaunch. Toggling sets
+// data-theme="light"|"dark" on <html>; the CSS in index.html has a matching
+// [data-theme="dark"] palette.
+const themeToggle = document.getElementById('theme-toggle')
+const THEME_KEY = 'ghosthr.desktop.theme'
+
+function applyTheme(theme) {
+  const t = theme === 'dark' ? 'dark' : 'light'
+  document.documentElement.setAttribute('data-theme', t)
+  themeToggle.textContent = t === 'dark' ? '☀️' : '🌙'
+  try { localStorage.setItem(THEME_KEY, t) } catch { /* storage unavailable */ }
+}
+
+function initTheme() {
+  let saved = 'light'
+  try { saved = localStorage.getItem(THEME_KEY) || 'light' } catch { /* ignore */ }
+  applyTheme(saved)
+}
+
+if (themeToggle) {
+  themeToggle.addEventListener('click', () => {
+    const cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light'
+    applyTheme(cur === 'dark' ? 'light' : 'dark')
+  })
+}
+initTheme()
+
 // A little welcome so the Agent tab isn't empty on first run.
 appendBot(
   '👋 Welcome to ghostHR desktop.\n\nI\'ll live here as your ghostHR agent. For now I can open job pages in the Browser tab — the extension does the scanning + autofill there.\n\nTry: "open https://www.workable.com/jobs/123" or type "help".',

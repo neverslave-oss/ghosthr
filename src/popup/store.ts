@@ -8,7 +8,7 @@
 import { computed, reactive, ref } from 'vue'
 import { analyze, type ParsedCv, type Verdict } from '../ai/verdict'
 import { PROVIDER_CATALOG, PROVIDER_ORDER, type ProviderId } from '../ai/providers'
-import { hasUsableProvider, type Settings } from '../ai/settings'
+import { hasUsableProvider, type Settings, type ThemePref } from '../ai/settings'
 import { getProviderModels, type ModelChoice } from '../ai/models'
 import type { PageScan } from '../ai/scanner'
 import { detectCvKind, blobToDataUrl, extractDocxText, type CvFileKind } from '../ai/cvocr'
@@ -72,6 +72,7 @@ export function usePopupStore() {
   async function refreshSettings() {
     const res = await send({ type: 'GHOSTHR_GET_SETTINGS' })
     settings.value = res.settings
+    applyTheme()
   }
 
   const provider = (pid: ProviderId) => settings.value?.providers.find((p) => p.id === pid)
@@ -250,6 +251,39 @@ export function usePopupStore() {
     setStatus('Setup complete — you can configure a provider anytime in Settings.')
   }
 
+  // ---------- Theme ----------
+  // Apply the current theme preference to the document (system = follow OS).
+  const THEME_ATTR = 'data-theme'
+  function applyTheme() {
+    const pref = settings.value?.theme ?? 'system'
+    const resolved =
+      pref === 'system'
+        ? (typeof window !== 'undefined' &&
+          window.matchMedia &&
+          window.matchMedia('(prefers-color-scheme: dark)').matches
+            ? 'dark'
+            : 'light')
+        : pref
+    document.documentElement.setAttribute(THEME_ATTR, resolved)
+  }
+  // Listen to OS changes for the 'system' preference.
+  const mq = typeof window !== 'undefined' && window.matchMedia
+    ? window.matchMedia('(prefers-color-scheme: dark)')
+    : null
+  const onScheme = () => { if (settings.value?.theme === 'system') applyTheme() }
+  mq?.addEventListener?.('change', onScheme)
+
+  // Cycle system -> light -> dark -> system. Light is the extension's default
+  // visual identity in the popup; system follows the OS.
+  const cycleTheme = async () => {
+    if (!settings.value) return
+    const order: ThemePref[] = ['system', 'light', 'dark']
+    const next = order[(order.indexOf(settings.value.theme) + 1) % order.length]
+    settings.value.theme = next
+    applyTheme()
+    await saveSettings()
+  }
+
   // Static fallback options (from the catalog) when dynamic fetch hasn't loaded.
   function staticModels(pid: ProviderId): ModelChoice[] {
     return (PROVIDER_CATALOG[pid]?.models ?? []).map((id) => ({ id, suggested: false }))
@@ -337,7 +371,7 @@ export function usePopupStore() {
     tab, status, statusError, loading,
     settings, scan, scannedUrl, verdict, cv, cvFileName, cvKind, applications,
     modelChoices, modelLoading, recClass, cvShortName,
-    provider, staticModels, hasUsable,
+    provider, staticModels, hasUsable, cycleTheme,
     refreshSettings, scanPage, onCvFile, runVerdict, autofill, trackApplication,
     loadApplications, restoreScan, saveSettings, loadModelChoices, loadAllModelChoices,
     setupNeeded, completeSetup, init,

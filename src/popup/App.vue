@@ -25,6 +25,7 @@ onMounted(() => s.init())
         <div class="brand-title">ghost<span>HR</span></div>
         <div class="brand-sub">AI job scout</div>
       </div>
+      <button class="theme-toggle" @click="s.cycleTheme" title="Toggle light/dark theme">{{ s.settings?.theme === 'dark' ? '🌙' : '☀️' }}</button>
     </header>
 
     <nav class="tabbar">

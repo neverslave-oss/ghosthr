@@ -17,6 +17,8 @@ export interface ProviderSettings {
   model: string
 }
 
+export type ThemePref = 'system' | 'light' | 'dark'
+
 export interface Settings {
   /** Provider order used for routing (local-first by default). */
   providers: ProviderSettings[]
@@ -26,6 +28,8 @@ export interface Settings {
   cvModel: ProviderId
   /** Autofill scanned fields into the ATS page automatically. */
   autofillEnabled: boolean
+  /** UI colour theme: follow the OS, or force light/dark. */
+  theme: ThemePref
   /** True once the user has completed the first-run setup screen. */
   setupDone: boolean
 }
@@ -44,6 +48,7 @@ export function defaultSettings(): Settings {
     scanModel: 'local',
     cvModel: 'local',
     autofillEnabled: true,
+    theme: 'system',
     setupDone: false,
   }
 }
@@ -64,6 +69,7 @@ export async function loadSettings(): Promise<Settings> {
 export async function saveSettings(s: Settings): Promise<void> {
   const clean = {
     ...s,
+    theme: s.theme,
     providers: s.providers.map((p) => ({
       id: p.id,
       enabled: p.enabled,
@@ -87,11 +93,15 @@ function mergeSettings(defaults: Settings, stored: Partial<Settings>): Settings 
       ...(s ?? {}),
     }
   })
+  const theme = ['system', 'light', 'dark'].includes(stored.theme as string)
+    ? (stored.theme as ThemePref)
+    : defaults.theme
   return {
     providers,
     scanModel: (stored.scanModel as ProviderId) || defaults.scanModel,
     cvModel: (stored.cvModel as ProviderId) || defaults.cvModel,
     autofillEnabled: stored.autofillEnabled ?? defaults.autofillEnabled,
+    theme,
     setupDone: stored.setupDone ?? defaults.setupDone,
   }
 }
