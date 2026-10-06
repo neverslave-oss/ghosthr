@@ -47,11 +47,14 @@
         padding: 6px 12px; cursor: pointer; font-weight: 600;
       }
       .spacer { flex: 1; }
-      .ext-btn {
-        display: flex; align-items: center; gap: 6px; background: var(--accent);
-        border: none; color: #fff; border-radius: 8px; padding: 7px 12px;
-        cursor: pointer; font-weight: 600; font-size: 13px;
+      /* Pinned extension action — ghostHR's own icon, like a browser toolbar pin. */
+      .ext-icon-btn {
+        display: flex; align-items: center; justify-content: center;
+        background: transparent; border: 1px solid var(--line); border-radius: 7px;
+        padding: 4px; cursor: pointer;
       }
+      .ext-icon-btn img { width: 20px; height: 20px; display: block; }
+      .ext-icon-btn.active { background: var(--bg); border-color: var(--accent); }
       .theme-toggle { background: var(--bg); border: 1px solid var(--line); color: var(--ink); border-radius: 8px; padding: 6px 10px; cursor: pointer; }
       main { flex: 1; display: flex; min-width: 0; min-height: 0; }
       .panel { flex: 1; display: none; flex-direction: column; min-width: 0; min-height: 0; }
@@ -106,13 +109,14 @@
         <button data-tab="agent" class="active">Agent</button>
         <button data-tab="browser">Browser</button>
       </nav>
-      <div id="urlbar" style="display:none">
+      <div id="urlbar" style="display:flex">
         <input id="url-input" placeholder="Enter a job URL…" />
         <button id="go">Go</button>
-        <button id="capture">Capture page</button>
+        <button id="capture">Capture</button>
+        <button class="ext-icon-btn" id="ext-toggle" title="ghostHR">
+          <img src="../build/icon.png" alt="ghostHR" />
+        </button>
       </div>
-      <div class="spacer"></div>
-      <button class="ext-btn" id="ext-toggle" title="Open ghostHR extension">🛠 ghostHR</button>
       <button class="theme-toggle" id="theme-toggle" title="Toggle dark/light theme">🌙</button>
     </header>
 
