@@ -46,6 +46,7 @@ const K = {
   applications: 'ghosthr.applications',
   cvProfiles: 'ghosthr.cv_profiles',
   jobScans: 'ghosthr.job_scans',
+  currentScan: 'ghosthr.current_scan',
   seq: 'ghosthr.seq',
 }
 
@@ -141,4 +142,15 @@ export async function saveJobScan(
 export async function listJobScans(): Promise<JobScan[]> {
   const arr = await readArr<JobScan>(K.jobScans)
   return arr.slice().reverse()
+}
+
+/** Persist the currently-active scan so it survives a popup close/reopen. */
+export async function saveCurrentScan(scan: unknown): Promise<void> {
+  await chrome.storage.local.set({ [K.currentScan]: scan })
+}
+
+/** Read back the persisted current scan (or null). */
+export async function getCurrentScan(): Promise<unknown> {
+  const got = await chrome.storage.local.get(K.currentScan)
+  return got?.[K.currentScan] ?? null
 }

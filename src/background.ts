@@ -9,8 +9,8 @@
  * Settings are read from chrome.storage.local (see src/ai/settings.ts).
  */
 
-import { openDb, addApplication, listApplications, getLatestCvProfile, upsertCvProfile, saveJobScan } from './db'
-import { loadSettings } from './ai/settings'
+import { openDb, addApplication, listApplications, getLatestCvProfile, upsertCvProfile, saveJobScan, saveCurrentScan, getCurrentScan } from './db'
+import { loadSettings, saveSettings } from './ai/settings'
 import { scanPage, localDetectedToScan, type PageScan } from './ai/scanner'
 import { parseCv, type CvParseInput } from './ai/cvocr'
 import type { ParsedCv } from './ai/verdict'
@@ -80,7 +80,12 @@ async function handleMessage(msg: any): Promise<any> {
         description: scan.jobDescription,
         fields_json: JSON.stringify(scan.fields),
       })
+      await saveCurrentScan(scan)
       return { ok: true, scan, settings, offline }
+    }
+
+    case 'GHOSTHR_GET_CURRENT_SCAN': {
+      return { ok: true, scan: (await getCurrentScan()) ?? null }
     }
 
     case 'GHOSTHR_PARSE_CV': {
@@ -116,8 +121,6 @@ async function handleMessage(msg: any): Promise<any> {
     }
 
     case 'GHOSTHR_SAVE_SETTINGS': {
-      // Re-import lazily to avoid circular import issues; settings is a thin shim.
-      const { saveSettings } = await import('./ai/settings')
       await saveSettings(msg.settings)
       return { ok: true }
     }

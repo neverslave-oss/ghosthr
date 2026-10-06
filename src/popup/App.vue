@@ -190,6 +190,16 @@ async function loadApplications() {
   applications.value = res.applications ?? []
 }
 
+// Reload the persisted current scan (if any) so fields don't vanish on reopen.
+async function restoreScan() {
+  try {
+    const res = await send({ type: 'GHOSTHR_GET_CURRENT_SCAN' })
+    if (res?.scan) scan.value = res.scan
+  } catch {
+    /* no persisted scan yet */
+  }
+}
+
 async function saveSettings() {
   if (!settings.value) return
   await send({ type: 'GHOSTHR_SAVE_SETTINGS', settings: settings.value })
@@ -199,7 +209,7 @@ async function saveSettings() {
 const provider = (pid: ProviderId) => settings.value?.providers.find((p) => p.id === pid)
 
 onMounted(async () => {
-  await Promise.all([loadApplications(), refreshSettings()])
+  await Promise.all([loadApplications(), refreshSettings(), restoreScan()])
 })
 </script>
 
