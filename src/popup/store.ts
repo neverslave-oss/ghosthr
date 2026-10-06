@@ -9,7 +9,6 @@ import { computed, reactive, ref, watch } from 'vue'
 import { analyze, type ParsedCv, type Verdict } from '../ai/verdict'
 import { PROVIDER_CATALOG, PROVIDER_ORDER, type ProviderId } from '../ai/providers'
 import type { Settings } from '../ai/settings'
-import { hasUsableProvider } from '../ai/settings'
 import { getProviderModels, type ModelChoice } from '../ai/models'
 import type { PageScan } from '../ai/scanner'
 import { detectCvKind, blobToDataUrl, extractDocxText, type CvFileKind } from '../ai/cvocr'
@@ -226,29 +225,9 @@ export function usePopupStore() {
   }
 
   // ---------- First-run setup ----------
-  // Show onboarding once (until setupDone). It must NOT depend on whether a
-  // provider is usable — otherwise a user with no provider configured yet
-  // would be locked out of the whole app and never reach Settings.
-  const setupNeeded = computed(() => {
-    if (!settings.value) return true // settings not loaded yet -> show setup
-    return !settings.value.setupDone
-  })
-
-  // Reactive boolean (reacts to setting/provider edits) — unlike the raw
-  // function we must NOT expose to templates, where it would always be truthy.
-  const hasUsable = computed(() =>
-    settings.value ? hasUsableProvider(settings.value) : false,
-  )
-
-  async function completeSetup() {
-    if (!settings.value) return
-    // Always allow completing onboarding. We never block on a usable provider,
-    // so Continue always unlocks the app and the user can set up a provider
-    // later from the Settings tab.
-    settings.value.setupDone = true
-    await saveSettings()
-    setStatus('Setup complete — you can configure a provider anytime in Settings.')
-  }
+  // Onboarding removed entirely — the app opens straight to the tabs and
+  // providers are configured from the Settings tab.
+  async function completeSetup() {}
 
   // Static fallback options (from the catalog) when dynamic fetch hasn't loaded.
   function staticModels(pid: ProviderId): ModelChoice[] {
@@ -312,9 +291,9 @@ export function usePopupStore() {
     tab, status, statusError, loading,
     settings, scan, scannedUrl, verdict, cv, cvFileName, cvKind, applications,
     modelChoices, modelLoading, recClass, cvShortName,
-    provider, staticModels, hasUsable,
+    provider, staticModels,
     refreshSettings, scanPage, onCvFile, runVerdict, autofill, trackApplication,
     loadApplications, restoreScan, saveSettings, loadModelChoices, loadAllModelChoices,
-    setupNeeded, completeSetup, init,
+    completeSetup, init,
   }
 }
