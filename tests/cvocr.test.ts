@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseCvJson, detectCvKind, extractDocxText } from '../src/ai/cvocr'
+import { parseCvJson, parseCvLocally, detectCvKind, extractDocxText } from '../src/ai/cvocr'
 
 describe('parseCvJson', () => {
   it('parses a clean CV response', () => {
@@ -62,5 +62,56 @@ describe('extractDocxText', () => {
     // A minimal zip is hard to fabricate; test that invalid input yields '' safely.
     const text = await extractDocxText(new Uint8Array([0x50, 0x4b, 0x03, 0x04])) // a bogus zip header
     expect(typeof text).toBe('string')
+  })
+})
+
+describe('parseCvLocally', () => {
+  const CV = `Fabio Pacifici
+fabio@example.com
++39 123 456 789
+
+Full-stack engineer with 6 years of experience building web apps.
+
+Skills: TypeScript, React, Python, Docker, Kubernetes
+
+Bachelor of Science in Computer Science
+
+Built a real-time dashboard handling 10k users (React + WebSocket).
+Led a team of 4 shipping a payments service.`
+
+  it('extracts name, email and phone', () => {
+    const cv = parseCvLocally(CV)
+    expect(cv.name).toBe('Fabio Pacifici')
+    expect(cv.email).toBe('fabio@example.com')
+    expect(cv.phone).toBeTruthy()
+  })
+
+  it('extracts skills from the shared vocabulary + inline list', () => {
+    const cv = parseCvLocally(CV)
+    expect(cv.skills).toContain('react')
+    expect(cv.skills).toContain('python')
+    expect(cv.skills).toContain('docker')
+    expect(cv.skills).toContain('TypeScript')
+  })
+
+  it('infers years of experience', () => {
+    const cv = parseCvLocally(CV)
+    expect(cv.years_experience).toBe(6)
+  })
+
+  it('extracts education lines', () => {
+    const cv = parseCvLocally(CV)
+    expect(cv.education?.some((e) => /bachelor/i.test(e))).toBe(true)
+  })
+
+  it('extracts project lines', () => {
+    const cv = parseCvLocally(CV)
+    expect(cv.projects?.some((p) => /built/i.test(p))).toBe(true)
+  })
+
+  it('handles empty input gracefully', () => {
+    const cv = parseCvLocally('')
+    expect(Array.isArray(cv.skills)).toBe(true)
+    expect(cv.skills.length).toBe(0)
   })
 })

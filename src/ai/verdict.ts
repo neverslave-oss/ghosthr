@@ -54,7 +54,7 @@ const GHOST_SIGNALS = [
   'no phone calls please',
 ]
 
-const COMMON_SKILLS = [
+export const COMMON_SKILLS = [
   'javascript', 'typescript', 'python', 'java', 'go', 'rust', 'c++', 'c#',
   'react', 'vue', 'angular', 'node', 'sql', 'postgres', 'mysql', 'mongodb',
   'docker', 'kubernetes', 'aws', 'gcp', 'azure', 'ci/cd', 'terraform',
