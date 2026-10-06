@@ -155,12 +155,11 @@ async function handleMessage(msg: any): Promise<any> {
     }
 
     case 'GHOSTHR_AGENT_CONTEXT': {
-      // Backend for the desktop Agent tab (reuses the existing in-process TS
-      // AI layer — no separate service, one installer, no Python). Bundles the
-      // current scan + latest CV, and computes the REAL verdict via
-      // verdict.analyze() so the Agent chat coaches from the same engine as
-      // the popup's "Score my fit". Returns nulls when not yet available so
-      // the Agent chat can message the user to scan/upload first.
+      // Full context bundle for the deep agent (desktop Agent tab). Returns
+      // the current scan, latest CV, tracked applications, and provider
+      // settings so the in-process LangGraph agent can gather real data via
+      // its tools. Also computes the deterministic baseline verdict
+      // (analyze()) which the deep agent AUGMENTS (never replaces).
       const scan = (await getCurrentScan()) as PageScan | null
       const profile = await getLatestCvProfile()
       let cv: ParsedCv | null = null
@@ -170,7 +169,9 @@ async function handleMessage(msg: any): Promise<any> {
       const verdict = scan?.jobDescription && cv
         ? analyze({ jobText: scan.jobDescription, cv })
         : null
-      return { ok: true, scan, cv, verdict }
+      const applications = await listApplications()
+      const settings = await loadSettings()
+      return { ok: true, scan, cv, verdict, applications, settings }
     }
 
     case 'GHOSTHR_ADD_APPLICATION': {

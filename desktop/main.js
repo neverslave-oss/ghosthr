@@ -14,6 +14,11 @@ const { app, BrowserWindow, session, ipcMain } = require('electron')
 const path = require('node:path')
 const fs = require('node:fs')
 
+// Deep-agent wiring (in-process, one installer, no Python).
+const { buildDeepAgent, modelForProvider, pickProvider } = require('./agent/deepAgent')
+const { Vfs } = require('./agent/vfs')
+const { webSearch } = require('./agent/webSearch')
+
 const DEV = !app.isPackaged
 const EXT_DIR = DEV
   ? path.resolve(__dirname, '../dist') // repo-root dist during `npm start`
@@ -84,4 +89,91 @@ app.on('window-all-closed', () => {
 // address the loaded ghostHR extension if needed.
 ipcMain.handle('ghosthr:get-extension-id', () => {
   return null
+})
+
+// ---------------------------------------------------------------------------
+// Deep agent (in-process). One installer, no Python. The agent lives entirely
+// in this main process; the renderer sends a user message over IPC and streams
+// back the assembled reply. It reads real ghostHR data (scan/CV/apps/settings)
+// through the loaded extension's GHOSTHR_AGENT_CONTEXT handler.
+// ---------------------------------------------------------------------------
+let deepAgent = null
+let agentVfs = null
+
+const agentSettings = () => {
+  // Re-fetch settings each turn through the extension data bundle so provider
+  // changes are honored live. This cache is refreshed per turn by the renderer
+  // (which pulls GHOSTHR_AGENT_CONTEXT and forwards the settings here).
+  return agentCurrentSettings || {}
+}
+let agentCurrentSettings = {}
+
+async function getExtensionContextViaBridge() {
+  // Ask the renderer to fetch the latest extension context (scan+CV+apps+
+  // settings) through the content-script bridge, then send it back here.
+  // Implemented via the renderer's pullAgentContext() exposed to main.
+  if (!mainWindow) return null
+  const ctx = await mainWindow.webContents.executeJavaScript(
+    `(async () => { try { return await window.__ghosthrPullAgentContext(); } catch(e) { return { ok:false, error:String(e&&e.message) }; } })()`,
+  )
+  return ctx
+}
+
+// Cache latest context so the agent tools can read it during a turn.
+let agentContextCache = null
+
+ipcMain.handle('ghosthr:agent-turn', async (_evt, payload) => {
+  const message = String(payload?.message || '').trim()
+  if (!message) return { ok: false, error: 'empty message' }
+
+  try {
+    // 1. Ensure the VFS exists (persisted under userData).
+    if (!agentVfs) {
+      agentVfs = new Vfs(path.join(app.getPath('userData'), 'ghosthr-vfs'))
+    }
+
+    // 2. Refresh context (scan/CV/apps/settings) from the extension bridge.
+    const ctx = await getExtensionContextViaBridge()
+    agentContextCache = ctx && ctx.ok
+      ? { scan: ctx.scan, cv: ctx.cv, verdict: ctx.verdict, applications: ctx.applications, settings: ctx.settings }
+      : agentContextCache
+    if (ctx?.settings) agentCurrentSettings = ctx.settings
+
+    // 3. Build the deep agent lazily (once per settings/model change).
+    if (!deepAgent) {
+      deepAgent = await buildDeepAgent({
+        getAgentContext: async () => ({
+          scan: agentContextCache?.scan || null,
+          cv: agentContextCache?.cv || null,
+          verdict: agentContextCache?.verdict || null,
+        }),
+        getApplications: async () => agentContextCache?.applications || [],
+        getSettings: async () => agentCurrentSettings,
+        vfs: agentVfs,
+        webSearch: webSearch,
+        resolveModel: (settings) => {
+          const p = pickProvider(settings)
+          return p ? modelForProvider(p) : null
+        },
+      })
+    }
+
+    // 4. Run the agent turn.
+    const final = await deepAgent.agent.stream(
+      { messages: [{ role: 'user', content: message }] },
+      { streamMode: 'values' },
+    )
+    let lastText = ''
+    for await (const chunk of final) {
+      const msgs = chunk?.values?.messages
+      if (!Array.isArray(msgs) || !msgs.length) continue
+      const last = msgs[msgs.length - 1]
+      const c = typeof last?.content === 'string' ? last.content : ''
+      if (last?.role === 'assistant' && c) lastText = c
+    }
+
+    return { ok: true, reply: lastText, model: deepAgent.modelUsed?.modelName || '', tools: deepAgent.tools }
+  } catch (e) {
+    return { ok: false, error: String(e?.message ?? e) }
+  }
 })

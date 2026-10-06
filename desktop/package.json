@@ -19,6 +19,7 @@
       "main.js",
       "preload.js",
       "renderer/**/*",
+      "agent/**/*",
       "../dist/**/*"
     ],
     "directories": {
@@ -33,5 +34,12 @@
     "linux": {
       "target": "AppImage"
     }
+  },
+  "dependencies": {
+    "@langchain/core": "^1.2.16",
+    "@langchain/langgraph": "^1.4.19",
+    "@langchain/ollama": "^1.3.0",
+    "@langchain/openai": "^1.6.2",
+    "zod": "^4.6.5"
   }
 }
