@@ -126,3 +126,39 @@ function normalizeKind(k: unknown): ScannedField['kind'] {
   if (s.includes('select')) return 'select'
   return 'input'
 }
+
+/**
+ * Shape of the free offline DOM detection (src/content/ats.ts DetectedForm),
+ * kept decoupled so scanner.ts stays pure and unit-testable.
+ */
+export interface LocalDetectedForm {
+  provider: string
+  descriptionText: string
+  fields: Array<{
+    kind: string
+    name?: string | null
+    label?: string | null
+    placeholder?: string | null
+    required?: boolean
+  }>
+}
+
+/**
+ * Convert a free offline DOM detection into a PageScan. This is the no-LLM
+ * tier: it needs only the heuristic ATS detector (already in ats.ts). The
+ * offline pass cannot reliably recover a job title/company, so those are left
+ * empty; fields + description carry the signal.
+ */
+export function localDetectedToScan(form: LocalDetectedForm): PageScan {
+  const fields = (form.fields ?? []).map((f, idx) => ({
+    label: f.label ?? f.name ?? f.placeholder ?? `Field ${idx + 1}`,
+    kind: normalizeKind(f.kind),
+    required: Boolean(f.required),
+  }))
+  return {
+    jobTitle: '',
+    company: '',
+    jobDescription: form.descriptionText ?? '',
+    fields,
+  }
+}

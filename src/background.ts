@@ -11,9 +11,10 @@
 
 import { openDb, addApplication, listApplications, getLatestCvProfile, upsertCvProfile, saveJobScan } from './db'
 import { loadSettings } from './ai/settings'
-import { scanPage, type PageScan } from './ai/scanner'
+import { scanPage, localDetectedToScan, type PageScan } from './ai/scanner'
 import { parseCv, type CvParseInput } from './ai/cvocr'
 import type { ParsedCv } from './ai/verdict'
+import type { DetectedForm } from './content/ats'
 
 chrome.runtime.onInstalled.addListener(async () => {
   try {
@@ -42,10 +43,35 @@ async function handleMessage(msg: any): Promise<any> {
   switch (msg.type) {
     case 'GHOSTHR_SCAN_PAGE': {
       const settings = await loadSettings()
-      const dataUrl = await captureActiveTab()
-      const scan: PageScan = await scanPage({ settings, screenshotDataUrl: dataUrl })
+
+      // Tier 1: free offline DOM detection (no LLM). Ask the content script.
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+      let scan: PageScan | null = null
+      let offline = false
+      if (tab?.id) {
+        try {
+          const det = await chrome.tabs.sendMessage(tab.id, { type: 'GHOSTHR_DETECT' })
+          const form: DetectedForm | null = det?.form
+          if (form) {
+            const localScan = localDetectedToScan(form as any)
+            if (localScan.fields.length || localScan.jobDescription) {
+              scan = localScan
+              offline = true
+            }
+          }
+        } catch {
+          // content script not injected / page not scriptable -> skip to LLM
+        }
+      }
+
+      // Tier 2: vision LLM fallback (only if offline pass found nothing).
+      if (!scan) {
+        const dataUrl = await captureActiveTab()
+        scan = await scanPage({ settings, screenshotDataUrl: dataUrl })
+      }
+
       if (!scan.jobDescription && !scan.fields.length) {
-        return { ok: true, empty: true, scan }
+        return { ok: true, empty: true, scan, offline }
       }
       await saveJobScan({
         url: msg.url ?? '',
@@ -54,7 +80,7 @@ async function handleMessage(msg: any): Promise<any> {
         description: scan.jobDescription,
         fields_json: JSON.stringify(scan.fields),
       })
-      return { ok: true, scan, settings }
+      return { ok: true, scan, settings, offline }
     }
 
     case 'GHOSTHR_PARSE_CV': {
