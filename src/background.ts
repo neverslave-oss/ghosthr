@@ -109,6 +109,33 @@ async function handleMessage(msg: any): Promise<any> {
       return { ok: true, scan, settings, offline }
     }
 
+    case 'GHOSTHR_SCAN_IMAGE': {
+      // Vision-scan an EXTERNALLY supplied screenshot (e.g. captured by the
+      // Electron desktop shell via webview.capturePage). Decouples "get the
+      // image" from "scan the image": the browser extension captures its own
+      // screenshot (captureActiveTab), but the desktop app cannot use
+      // chrome.tabs.captureVisibleTab (unsupported in Electron), so it hands
+      // the PNG in here instead. Runs the SAME vision pipeline (scanPage),
+      // so settings/provider routing/persistence are identical.
+      const settings = await loadSettings()
+      if (!msg.imageDataUrl || typeof msg.imageDataUrl !== 'string') {
+        return { ok: false, error: 'GHOSTHR_SCAN_IMAGE requires imageDataUrl' }
+      }
+      const scan = await scanPage({ settings, screenshotDataUrl: msg.imageDataUrl })
+      if (!scan.jobDescription && !scan.fields.length) {
+        return { ok: true, empty: true, scan, offline: false }
+      }
+      await saveJobScan({
+        url: msg.url ?? '',
+        title: scan.jobTitle,
+        company: scan.company,
+        description: scan.jobDescription,
+        fields_json: JSON.stringify(scan.fields),
+      })
+      await saveCurrentScan(scan)
+      return { ok: true, scan, settings, offline: false }
+    }
+
     case 'GHOSTHR_GET_CURRENT_SCAN': {
       return { ok: true, scan: (await getCurrentScan()) ?? null }
     }

@@ -114,3 +114,37 @@ chrome.runtime?.onMessage?.addListener((msg, _sender, sendResponse) => {
     /* badge is best-effort */
   }
 })()
+
+// ---------------------------------------------------------------------------
+// Desktop vision-scan bridge.
+//
+// The Electron desktop shell captures the page itself (webview.capturePage —
+// the chrome.tabs.captureVisibleTab API is not supported in Electron) and
+// needs the captured PNG run through the SAME vision pipeline as a browser
+// scan. The renderer (parent page) cannot call chrome.runtime directly, so it
+// injects the image into the webview via executeJavaScript -> dispatches a
+// CustomEvent with the image. CustomEvents DO cross the isolated-content-script
+// boundary. The content script relays the image to the background
+// GHOSTHR_SCAN_IMAGE handler and writes the result onto a DOM attribute on <html>
+// (an out-of-band channel the parent can poll via executeJavaScript; the
+// isolated/main worlds do not share JS globals).
+// ---------------------------------------------------------------------------
+document.addEventListener('__ghosthr_scan_image', (ev) => {
+  const d = (ev as CustomEvent).detail as { imageDataUrl?: string } | undefined
+  const dataUrl = d?.imageDataUrl
+  if (typeof dataUrl !== 'string' || !dataUrl) return
+  void (async () => {
+    try {
+      const res = await chrome.runtime?.sendMessage?.({
+        type: 'GHOSTHR_SCAN_IMAGE',
+        imageDataUrl: dataUrl,
+      })
+      document.documentElement?.setAttribute('data-ghosthr-result', JSON.stringify(res))
+    } catch (err) {
+      document.documentElement?.setAttribute(
+        'data-ghosthr-result',
+        JSON.stringify({ ok: false, error: String((err as Error)?.message ?? err) }),
+      )
+    }
+  })()
+})
