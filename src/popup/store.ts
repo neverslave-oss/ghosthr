@@ -232,8 +232,18 @@ export function usePopupStore() {
     return !settings.value.setupDone || !hasUsableProvider(settings.value)
   })
 
+  // Reactive boolean (reacts to setting/provider edits) — unlike the raw
+  // function we must NOT expose to templates, where it would always be truthy.
+  const hasUsable = computed(() =>
+    settings.value ? hasUsableProvider(settings.value) : false,
+  )
+
   async function completeSetup() {
     if (!settings.value) return
+    if (!hasUsableProvider(settings.value)) {
+      setStatus('Enable a provider and add your API key + model first.', true)
+      return
+    }
     settings.value.setupDone = true
     await saveSettings()
     setStatus('Setup complete.')
@@ -301,7 +311,7 @@ export function usePopupStore() {
     tab, status, statusError, loading,
     settings, scan, scannedUrl, verdict, cv, cvFileName, cvKind, applications,
     modelChoices, modelLoading, recClass, cvShortName,
-    provider, staticModels, hasUsableProvider,
+    provider, staticModels, hasUsable,
     refreshSettings, scanPage, onCvFile, runVerdict, autofill, trackApplication,
     loadApplications, restoreScan, saveSettings, loadModelChoices, loadAllModelChoices,
     setupNeeded, completeSetup, init,
