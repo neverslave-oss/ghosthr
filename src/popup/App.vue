@@ -4,6 +4,7 @@ import { usePopupStore, type PopupStore } from './store'
 import ScanView from './ScanView.vue'
 import TrackView from './TrackView.vue'
 import SettingsView from './SettingsView.vue'
+import SetupView from './SetupView.vue'
 
 const s: PopupStore = usePopupStore()
 
@@ -30,9 +31,12 @@ onMounted(() => s.init())
       <button :class="{ active: s.tab === 'settings' }" @click="s.tab = 'settings'">Settings</button>
     </nav>
 
-    <ScanView v-if="s.tab === 'scan'" :store="s" />
-    <TrackView v-else-if="s.tab === 'track'" :store="s" />
-    <SettingsView v-else-if="s.tab === 'settings'" :store="s" />
+    <SetupView v-if="s.setupNeeded" :store="s" />
+    <template v-else>
+      <ScanView v-if="s.tab === 'scan'" :store="s" />
+      <TrackView v-else-if="s.tab === 'track'" :store="s" />
+      <SettingsView v-else-if="s.tab === 'settings'" :store="s" />
+    </template>
 
     <div v-if="s.status" class="statusbar" :class="{ error: s.statusError }">{{ s.status }}</div>
   </div>
