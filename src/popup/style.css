@@ -22,6 +22,28 @@
   --shadow: 0 8px 28px rgba(2, 6, 23, 0.6);
 }
 
+/* ---------- Light theme ----------
+   The store sets data-theme="light"|="dark"|="system" on <html>. "system"
+   resolves to one of the two concrete values. This block overrides the dark
+   :root palette for light mode (white cards on a #cccccc background). */
+[data-theme="light"] {
+  --bg: #cccccc;
+  --bg-soft: #e2e2e2;
+  --card: #ffffff;
+  --card-border: rgba(15, 23, 42, 0.10);
+  --line: rgba(15, 23, 42, 0.14);
+  --ink: #1a1a1a;
+  --ink-dim: #5a6b83;
+  --ink-faint: #8899b3;
+  --accent-1: #0284c7;
+  --accent-2: #6d5ce0;
+  --accent-grad: linear-gradient(135deg, #0284c7 0%, #6d5ce0 100%);
+  --ok: #15803d;
+  --warn: #b45309;
+  --bad: #b91c1c;
+  --shadow: 0 8px 28px rgba(15, 23, 42, 0.18);
+}
+
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
 html, body {
@@ -58,6 +80,21 @@ body {
 .brand-mark svg { width: 17px; height: 17px; }
 .brand-title { font-size: 18px; font-weight: 800; letter-spacing: -0.02em; }
 .brand-title span { background: var(--accent-grad); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+/* Theme toggle — pushes to the right end of the header row. */
+.brand.header-row { justify-content: space-between; align-items: center; }
+.theme-toggle {
+  margin-left: auto;
+  width: 30px; height: 30px;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--ink);
+  font-size: 15px;
+  cursor: pointer;
+  display: grid; place-items: center;
+  transition: background .15s ease;
+}
+.theme-toggle:hover { background: var(--bg-soft); }
 .brand-sub { font-size: 10px; color: var(--ink-faint); letter-spacing: 0.08em; text-transform: uppercase; margin-top: 1px; }
 
 /* ---------- Tabs ---------- */
