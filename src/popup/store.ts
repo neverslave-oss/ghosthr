@@ -5,7 +5,7 @@
  * dynamic model picker). Extracted from App.vue so each popup file stays well
  * under the project's 400 LOC guideline and the view components stay thin.
  */
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, reactive, ref } from 'vue'
 import { analyze, type ParsedCv, type Verdict } from '../ai/verdict'
 import { PROVIDER_CATALOG, PROVIDER_ORDER, type ProviderId } from '../ai/providers'
 import type { Settings } from '../ai/settings'
@@ -264,27 +264,14 @@ export function usePopupStore() {
     await Promise.all(providerOrder.map((pid) => loadModelChoices(pid)))
   }
 
-  // Auto-populate each provider's model picker the moment it becomes configured
-  // (enabled + key present for cloud) — e.g. a user pasting their API key in the
-  // welcome/setup screen should immediately see that provider's models.
-  watch(
-    () => settings.value?.providers.map((p) => p.id + '|' + p.enabled + '|' + (p.id === 'local' || p.apiKey ? 'k' : '')),
-    () => {
-      for (const pid of providerOrder) {
-        const p = provider(pid)
-        if (!p) continue
-        const configured = p.enabled && (pid === 'local' || Boolean(p.apiKey))
-        if (configured && !modelChoices.value[pid]?.length) {
-          loadModelChoices(pid)
-        }
-      }
-    },
-    { immediate: true },
-  )
-
   async function init() {
     await Promise.all([loadApplications(), refreshSettings(), restoreScan()])
-    await loadAllModelChoices()
+    // NOTE: intentionally do NOT auto-fetch provider model lists on open.
+    // The picker already shows models from the static catalog + suggestions,
+    // so no network calls are needed at startup. Auto-fetching here hit every
+    // provider's /models endpoint on every panel open (e.g. localhost:11434
+    // connection-refused when Ollama wasn't running), which made the app feel
+    // broken/hang-y. Models are fetched lazily on an explicit "Refresh models".
   }
 
   return {
