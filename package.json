@@ -9,7 +9,8 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:e2e": "npm run build && playwright test tests/e2e"
   },
   "dependencies": {
     "pdfjs-dist": "^4.10.38",
