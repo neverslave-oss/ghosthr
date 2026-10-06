@@ -30,6 +30,9 @@ export interface Verdict {
 }
 
 export interface ParsedCv {
+  name?: string
+  email?: string
+  phone?: string
   skills: string[]
   years_experience?: number
   education?: string[]

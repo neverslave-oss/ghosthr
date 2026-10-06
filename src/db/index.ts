@@ -56,6 +56,17 @@ export interface OutboxEvent {
   created_at: string
 }
 
+/** A single scanned job advertisement (result of a vision scan). */
+export interface JobScan {
+  id: number
+  url: string
+  title: string
+  company: string
+  description: string
+  fields_json: string
+  created_at: string
+}
+
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS cv_profiles (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -95,6 +106,15 @@ CREATE TABLE IF NOT EXISTS outbox (
   kind TEXT NOT NULL,
   payload_json TEXT NOT NULL DEFAULT '{}',
   status TEXT NOT NULL DEFAULT 'pending',
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS job_scans (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  url TEXT NOT NULL,
+  title TEXT NOT NULL DEFAULT '',
+  company TEXT NOT NULL DEFAULT '',
+  description TEXT NOT NULL DEFAULT '',
+  fields_json TEXT NOT NULL DEFAULT '[]',
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_applications_company ON applications(company);
@@ -167,4 +187,26 @@ export function getLatestCvProfile(): CvProfile | null {
   const obj: Record<string, unknown> = {}
   cols.forEach((c, i) => (obj[c] = row[i]))
   return obj as unknown as CvProfile
+}
+
+/** Persist a completed job scan. Returns the new row id. */
+export function saveJobScan(scan: Omit<JobScan, 'id' | 'created_at'>): number {
+  if (!db) throw new Error('db not open')
+  db.run(
+    `INSERT INTO job_scans (url, title, company, description, fields_json) VALUES (?, ?, ?, ?, ?)`,
+    [scan.url, scan.title, scan.company, scan.description, scan.fields_json],
+  )
+  return Number(db.exec('SELECT last_insert_rowid() AS id')[0].values[0][0])
+}
+
+export function listJobScans(): JobScan[] {
+  if (!db) throw new Error('db not open')
+  const res = db.exec('SELECT * FROM job_scans ORDER BY id DESC LIMIT 20')
+  if (res.length === 0) return []
+  const cols = res[0].columns
+  return res[0].values.map((row) => {
+    const obj: Record<string, unknown> = {}
+    cols.forEach((c, i) => (obj[c] = row[i]))
+    return obj as unknown as JobScan
+  })
 }

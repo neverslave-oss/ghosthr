@@ -13,6 +13,8 @@ import {
   type AthFormField,
   type DetectedForm,
 } from './ats'
+import { fillField, cvValueBag } from './autofill'
+import type { ParsedCv } from '../ai/verdict'
 
 function collectFields(): AthFormField[] {
   const fields: AthFormField[] = []
@@ -73,6 +75,17 @@ chrome.runtime?.onMessage?.addListener((msg, _sender, sendResponse) => {
   if (msg?.type === 'GHOSTHR_DETECT') {
     const form = detectAndReport()
     sendResponse({ form })
+    return
+  }
+  if (msg?.type === 'GHOSTHR_AUTOFILL') {
+    // msg.fields = ScannedField[]; msg.cv = ParsedCv
+    const bag = cvValueBag((msg.cv ?? { skills: [] }) as ParsedCv)
+    let filled = 0
+    for (const field of msg.fields ?? []) {
+      if (fillField(field, bag)) filled++
+    }
+    sendResponse({ ok: true, filled })
+    return
   }
   return true
 })
