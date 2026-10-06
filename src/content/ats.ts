@@ -19,6 +19,8 @@ export interface DetectedForm {
   provider: 'workable' | 'generic'
   descriptionText: string
   fields: AthFormField[]
+  /** URL of the actual application form when this is an overview/description page. */
+  applyUrl?: string | null
 }
 
 export function normalizeText(s: string | null | undefined): string {
@@ -68,6 +70,7 @@ export function buildDetectedForm(input: {
   bodyText: string
   fields: AthFormField[]
   firstFieldIndex: number
+  applyUrl?: string | null
 }): DetectedForm {
   const provider = detectProvider(input.url, input.bodyText)
   const descriptionText = extractJobDescription(input.bodyText, input.firstFieldIndex)
@@ -75,6 +78,7 @@ export function buildDetectedForm(input: {
     provider,
     descriptionText,
     fields: input.fields,
+    applyUrl: input.applyUrl ?? null,
   }
 }
 
@@ -97,6 +101,17 @@ export function mapFieldName(label: string | null, placeholder: string | null): 
   if (/(resume|cv|application file|attach)/i.test(hay)) return 'resume'
   if (/city|location|address/i.test(hay)) return 'location'
   return null
+}
+
+/**
+ * True if the text looks like a job *advert* page at all (heading + apply
+ * language) — even if no prefillable fields are present (e.g. a Workable
+ * overview page whose form lives on a separate /apply/ URL).
+ */
+export function looksLikeJobAdvert(bodyText: string): boolean {
+  return /(job|position|apply for this job|apply now|candidate|we are looking for|about the role|requirements|responsibilities|full time|remote)/i.test(
+    bodyText,
+  )
 }
 
 /**

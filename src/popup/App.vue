@@ -74,9 +74,13 @@ async function scanPageClick() {
     const s: PageScan = res.scan
     scan.value = s
     scannedUrl.value = urlRes.url ?? ''
-    setStatus(res.offline
-      ? `Detected locally (offline) — ${s.fields.length} field(s), no AI needed.`
-      : `Scan complete — ${s.fields.length} field(s) extracted.`)
+    if (s.applyUrl) {
+      setStatus('Job advert detected — open the application form to extract fields.')
+    } else {
+      setStatus(res.offline
+        ? `Detected locally (offline) — ${s.fields.length} field(s), no AI needed.`
+        : `Scan complete — ${s.fields.length} field(s) extracted.`)
+    }
   } catch (e: any) {
     setStatus(`Scan failed: ${e?.message ?? e}`, true)
   } finally {
