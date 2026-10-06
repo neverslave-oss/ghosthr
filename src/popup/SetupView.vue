@@ -7,7 +7,7 @@ const s = props.store
 </script>
 
 <template>
-  <main class="setup">
+  <main class="setup" v-if="s.settings">
     <section class="section">
       <h2><span>👋 Welcome to ghostHR</span></h2>
       <p class="hint">
