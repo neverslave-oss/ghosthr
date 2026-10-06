@@ -1,0 +1,37 @@
+{
+  "name": "ghosthr-desktop",
+  "version": "0.1.0",
+  "description": "ghostHR desktop app — integrated Chromium browser tab with the ghostHR extension preloaded, plus an Agent chat tab.",
+  "main": "main.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder"
+  },
+  "devDependencies": {
+    "electron": "^44.5.1",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "agency.nsa.ghosthr",
+    "productName": "ghostHR",
+    "files": [
+      "main.js",
+      "preload.js",
+      "renderer/**/*",
+      "../dist/**/*"
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "win": {
+      "target": "nsis"
+    },
+    "mac": {
+      "target": "dmg"
+    },
+    "linux": {
+      "target": "AppImage"
+    }
+  }
+}
