@@ -168,3 +168,24 @@ export function localDetectedToScan(form: LocalDetectedForm): PageScan {
     applyUrl: form.applyUrl || null,
   }
 }
+
+/**
+ * Minimum real text fields an offline DOM scan must recover before it can be
+ * trusted instead of the full vision-LLM scan.
+ */
+const OFFLINE_MIN_FIELDS = 3
+
+/**
+ * True when a free offline DOM detection is too thin to rely on, in which
+ * case the caller should fall through to the vision-LLM scan.
+ *
+ * Offline field detection on modern (React/Vue) ATS forms often captures only
+ * a couple of inputs because labels live outside <label>, so a sparse result
+ * means the vision model should read the rendered page for the full field set
+ * (and the job title/company the offline pass can't recover).
+ */
+export function isOfflineScanSparse(scan: PageScan | null | undefined): boolean {
+  if (!scan || !scan.fields?.length) return true
+  if (!scan.jobDescription) return true
+  return scan.fields.length < OFFLINE_MIN_FIELDS
+}

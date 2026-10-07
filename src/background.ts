@@ -11,7 +11,7 @@
 
 import { openDb, addApplication, listApplications, getLatestCvProfile, upsertCvProfile, saveJobScan, saveCurrentScan, getCurrentScan } from './db'
 import { loadSettings, saveSettings } from './ai/settings'
-import { scanPage, localDetectedToScan, type PageScan } from './ai/scanner'
+import { scanPage, localDetectedToScan, isOfflineScanSparse, type PageScan } from './ai/scanner'
 import { parseCv, type CvParseInput } from './ai/cvocr'
 import { analyze, type ParsedCv } from './ai/verdict'
 import type { DetectedForm } from './content/ats'
@@ -79,7 +79,15 @@ async function handleMessage(msg: any): Promise<any> {
           const form: DetectedForm | null = det?.form
           if (form) {
             const localScan = localDetectedToScan(form as any)
-            if (localScan.fields.length || localScan.jobDescription) {
+            // Only trust the free offline pass when it actually recovered a
+            // sensible field set — modern (React/Vue) ATS forms often yield
+            // only a couple of inputs to the selector heuristic, in which
+            // case the vision-LLM scan should read the rendered page for the
+            // full field list (+ job title/company the offline pass can't get).
+            if (
+              !isOfflineScanSparse(localScan) &&
+              (localScan.fields.length || localScan.jobDescription)
+            ) {
               scan = localScan
               offline = true
             }
