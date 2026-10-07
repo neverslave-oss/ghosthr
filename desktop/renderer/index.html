@@ -47,14 +47,6 @@
         padding: 6px 12px; cursor: pointer; font-weight: 600;
       }
       .spacer { flex: 1; }
-      /* Pinned extension action — ghostHR's own icon, like a browser toolbar pin. */
-      .ext-icon-btn {
-        display: flex; align-items: center; justify-content: center;
-        background: transparent; border: 1px solid var(--line); border-radius: 7px;
-        padding: 4px; cursor: pointer;
-      }
-      .ext-icon-btn img { width: 20px; height: 20px; display: block; }
-      .ext-icon-btn.active { background: var(--bg); border-color: var(--accent); }
       .theme-toggle { background: var(--bg); border: 1px solid var(--line); color: var(--ink); border-radius: 8px; padding: 6px 10px; cursor: pointer; }
       main { flex: 1; display: flex; min-width: 0; min-height: 0; }
       .panel { flex: 1; display: none; flex-direction: column; min-width: 0; min-height: 0; }
@@ -84,19 +76,6 @@
       .agent .composer input { flex: 1; background: var(--bg); border: 1px solid var(--line); color: var(--ink); border-radius: 6px; padding: 10px 12px; font-size: 14px; }
       .agent .composer button { background: var(--accent); border: none; color: #fff; border-radius: 6px; padding: 10px 16px; cursor: pointer; font-weight: 600; }
       .empty { color: var(--ink-dim); }
-
-      /* ghostHR extension side panel — hosts the extension's OWN popup UI. */
-      .side-panel {
-        width: 380px; min-width: 320px; max-width: 480px; display: none;
-        flex-direction: column; background: var(--panel); border-left: 1px solid var(--line); min-height: 0;
-      }
-      .side-panel.open { display: flex; }
-      .side-panel webview { border: 0; border-radius: 0; }
-      .side-panel .sp-head {
-        display: flex; align-items: center; gap: 8px; padding: 8px 12px;
-        border-bottom: 1px solid var(--line); font-size: 13px; font-weight: 600;
-      }
-      .side-panel .sp-head button { margin-left: auto; background: var(--bg); border: 1px solid var(--line); color: var(--ink); border-radius: 6px; padding: 4px 8px; cursor: pointer; }
     </style>
   </head>
   <body>
@@ -113,9 +92,6 @@
         <input id="url-input" placeholder="Enter a job URL…" />
         <button id="go">Go</button>
         <button id="capture">Capture</button>
-        <button class="ext-icon-btn" id="ext-toggle" title="ghostHR">
-          <img src="../build/icon.png" alt="ghostHR" />
-        </button>
       </div>
       <button class="theme-toggle" id="theme-toggle" title="Toggle dark/light theme">🌙</button>
     </header>
@@ -135,13 +111,6 @@
 
       <section id="tab-browser" class="panel browser" style="display:none">
       </section>
-
-      <aside class="side-panel" id="ext-panel">
-        <div class="sp-head">
-          <span>🛠 ghostHR</span>
-          <button id="ext-close" title="Close">✕</button>
-        </div>
-      </aside>
     </main>
 
     <script type="module" src="./renderer.js"></script>
