@@ -2,97 +2,91 @@
  * ghostHR desktop — renderer logic (ES module).
  *
  * The desktop is a browser. ghostHR is loaded as a native extension into the
- * same Electron session as the <webview>, and the user interacts with its OWN
- * UI (the extension popup/side panel) — exactly like in a real Chrome window —
- * via a toolbar button that toggles a side panel hosting the extension's real
- * popup page. No bespoke reimplementation of settings/CV/verdict.
+ * same Electron default session as the main process's WebContentsView browser
+ * (replacing the legacy <webview>), and the user interacts with its OWN UI (the
+ * extension popup/side panel) exactly like in a real Chrome window. The browser
+ * page itself is drawn by a main-process native WebContentsView; this renderer
+ * is just the chrome (header, urlbar, tabs, theme toggle, chat) that positions
+ * that view via window.browserApi.setBounds(...) and drives it via IPC.
  *
- * Layout: Agent tab is split-screen with the BROWSER on the LEFT and the
- * chat on the RIGHT. A single <webview> is shared between the Browser tab and
- * the Agent split-pane (reparented into whichever container is active so there
- * is exactly one live browser page holding the loaded extension).
+ * Layout: Agent tab is split-screen — the browser on the LEFT, chat on the
+ * RIGHT. Browser tab shows the browser filling the whole area. Only one region
+ * is visible at a time; the renderer measures whichever browser container is
+ * active (ResizeObserver + tab switch) and reports its pixel bounds to main.
  */
-
-// ---------- Shared webview ----------
-const webview = document.createElement('webview')
-webview.id = 'browser-vw'
-// Use Electron's own user agent (NOT a Brave/spoofed UA): the ghostHR
-// extension's in-page launcher only mounts when it detects the electron
-// inside Electron (`Electron/` token), so overriding the UA hides the
-// extension UI. Homepage stays neutral. No useragent override -> Electron
-// supplies its default UA containing `Electron/<ver>`.
-webview.setAttribute('src', 'https://www.google.com')
-webview.setAttribute('allowpopups', 'true')
-
-const browserHost = document.getElementById('tab-browser')
-const agentBrowserHost = document.getElementById('agent-browser')
-
-function mountWebview(host) {
-  if (!host || webview.parentElement === host) return
-  webview.remove()
-  host.appendChild(webview)
-}
 
 // ---------- Tab switching ----------
 const tabButtons = document.querySelectorAll('.tabs button')
 const urlBar = document.getElementById('urlbar')
+const browserHost = document.getElementById('tab-browser')
+const agentBrowserHost = document.getElementById('agent-browser')
+let currentTab = 'agent'
 
 function switchTab(name) {
+  currentTab = name
   tabButtons.forEach((b) => b.classList.toggle('active', b.dataset.tab === name))
   document.getElementById('tab-agent').classList.toggle('active', name === 'agent')
   document.getElementById('tab-browser').classList.toggle('active', name === 'browser')
-  // The browser toolbar (url bar + pinned ghostHR action + capture) is the
-  // desktop's browser chrome — it stays visible so the extension is reachable
-  // like a real browser regardless of which view is active.
-  if (name === 'browser') mountWebview(browserHost)
-  else if (name === 'agent') mountWebview(agentBrowserHost)
+  // The browser toolbar (url bar + pinned ghostHR action + capture) stays as
+  // the desktop's browser chrome so the extension stays reachable either way.
+  requestAnimationFrame(reportBounds)
 }
 
 tabButtons.forEach((b) => {
   b.addEventListener('click', () => switchTab(b.dataset.tab))
 })
 
+// ---------- Browser bounds (position the native WebContentsView) ----------
+function browserHostFor(tab) {
+  return tab === 'browser' ? browserHost : agentBrowserHost
+}
+
+// Measure the active browser container and tell main where to put the view.
+function reportBounds() {
+  const host = browserHostFor(currentTab)
+  if (!host || !window.browserApi) return
+  const r = host.getBoundingClientRect()
+  if (!r.width || !r.height) return // hidden container -> nothing to report
+  window.browserApi.setBounds({ x: r.x, y: r.y, width: r.width, height: r.height })
+}
+
+// Keep the view glued to its container across resizes and relayouts.
+const ro = new ResizeObserver(() => reportBounds())
+for (const host of [browserHost, agentBrowserHost]) {
+  if (host) ro.observe(host)
+}
+window.addEventListener('resize', reportBounds)
+
 // ---------- Browser ----------
 const urlInput = document.getElementById('url-input')
 const goBtn = document.getElementById('go')
 
-// The Browser view loads ghostHR natively via the shared session: its content
-// script renders ghostHR's own in-page UI (floating action + side panel) inside
-// the webview, exactly like the standalone add-on in a real browser. So the
+// The Browser view loads ghostHR natively via the shared default session: its
+// content script renders ghostHR's own in-page UI (floating action + side panel)
+// inside the view, exactly like the standalone add-on in a real browser. So the
 // desktop shell has no ghostHR-specific chrome of its own — the URL bar,
 // navigation and Capture are the only browser chrome.
 
 function navigate(url) {
-  let u = url.trim()
-  if (!u) return
-  if (!/^https?:\/\//i.test(u)) u = 'https://' + u
-  if (webview && typeof webview.loadURL === 'function') webview.loadURL(u)
-  else webview.setAttribute('src', u)
+  if (!window.browserApi) return
+  window.browserApi.navigate(url)
 }
 
 goBtn.addEventListener('click', () => navigate(urlInput.value))
 urlInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') navigate(urlInput.value) })
 
-if (webview) {
-  webview.addEventListener('did-navigate', (e) => { urlInput.value = e.url || '' })
-  webview.addEventListener('did-navigate-in-page', (e) => { urlInput.value = e.url || '' })
+if (window.browserApi) {
+  window.browserApi.onNavigate(({ url } = {}) => {
+    if (url) urlInput.value = url
+  })
 }
 
 // ---------- Scan (feed captured page into the extension content script) ----------
 async function captureScan() {
-  const image = await webview.capturePage()
-  const dataUrl = image.toDataURL()
-  await webview.executeJavaScript(
-    `document.documentElement.removeAttribute('data-ghosthr-result');` +
-      `document.dispatchEvent(new CustomEvent('__ghosthr_scan_image', { detail: { imageDataUrl: ${JSON.stringify(dataUrl)} } })); true`,
-  )
-  let res = null
-  for (let i = 0; i < 60 && !res; i++) {
-    await new Promise((r) => setTimeout(r, 500))
-    const raw = await webview.executeJavaScript(`document.documentElement.getAttribute('data-ghosthr-result')`)
-    if (raw) { try { res = JSON.parse(raw) } catch { /* retry */ } }
-  }
-  return res
+  const cap = await window.browserApi.capturePage()
+  if (!cap || !cap.ok) throw new Error((cap && cap.error) || 'capture failed')
+  const res = await window.browserApi.scanImage(cap.dataUrl)
+  return res || { ok: false, error: 'no scan result' }
 }
 
 const captureBtn = document.getElementById('capture')
@@ -148,13 +142,11 @@ function addStreamBubble() {
 function appendBot(text) { addMsg('bot', text) }
 
 // Refresh scan/CV/apps/settings via the extension's own context handler so the
-// deep agent reads the SAME data the extension stores (shared storage).
+// deep agent reads the SAME data the extension stores (shared storage). Main
+// dispatches into the embedded browser's page and returns the parsed bundle.
 async function pullAgentContext() {
-  const webviewForCtx = document.querySelectorAll('webview')[0] || webview
-  const raw = await webviewForCtx.executeJavaScript(
-    `(async () => { try { const r = await chrome.runtime.sendMessage({ type: 'GHOSTHR_AGENT_CONTEXT' }); document.documentElement.setAttribute('data-ghosthr-agent', JSON.stringify(r)); return document.documentElement.getAttribute('data-ghosthr-agent'); } catch(e){ return JSON.stringify({ ok:false, error:String(e&&e.message) }); } })()`,
-  )
-  try { return JSON.parse(raw) } catch { return { ok: false, error: 'engine context unavailable' } }
+  const res = await window.browserApi.getAgentContext()
+  return res || { ok: false, error: 'engine context unavailable' }
 }
 
 window.__ghosthrPullAgentContext = () => pullAgentContext().catch((e) => ({ ok: false, error: String(e && e.message) }))
@@ -224,7 +216,6 @@ async function handleAgent(text) {
   }
   const urlMatch = text.match(/https?:\/\/[^\s]+/)
   if (urlMatch && /(open|go|browse|visit|look at|load)/.test(lower)) {
-    mountWebview(browserHost)
     switchTab('browser')
     navigate(urlMatch[0])
     appendBot(`Opened ${urlMatch[0]} in the browser. Use the ghostHR launcher on the page (HR button) to scan/autofill.`)
@@ -271,7 +262,7 @@ if (themeToggle) {
 initTheme()
 
 // ---------- Boot ----------
-mountWebview(agentBrowserHost)
+requestAnimationFrame(reportBounds)
 
 appendBot(
   '👋 Welcome to ghostHR desktop.\n\nThis is a real browser with ghostHR loaded natively into the page — use the ghostHR launcher (HR button) that appears on pages to open the extension (settings, CV, verdict) exactly like a standalone add-on. Providers + CV sync with the standalone browser extension.\n\nTry "open https://www.workable.com/jobs/123" or open a job page and hit "Capture page".',

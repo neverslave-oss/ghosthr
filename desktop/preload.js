@@ -24,3 +24,21 @@ contextBridge.exposeInMainWorld('ghosthr', {
     return () => ipcRenderer.removeListener('ghosthr:agent-done', l)
   },
 })
+
+// Browser API — native WebContentsView embedded browser driven from renderer
+// over IPC. The view + capture/scan/context live in the main process now that
+// there is no <webview> the renderer could reach with capturePage/executeJavaScript.
+contextBridge.exposeInMainWorld('browserApi', {
+  navigate: (url) => ipcRenderer.invoke('browser:navigate', url),
+  // Tell main where the browser region sits (CSS pixels, viewport-relative).
+  setBounds: (rect) => ipcRenderer.invoke('browser:set-bounds', rect),
+  capturePage: () => ipcRenderer.invoke('browser:capture-page'),
+  scanImage: (dataUrl) => ipcRenderer.invoke('browser:scan-image', dataUrl),
+  getAgentContext: () => ipcRenderer.invoke('browser:get-agent-context'),
+  // Subscribe to URL changes from main (returns an unsubscribe fn).
+  onNavigate(cb) {
+    const l = (_e, p) => cb(p)
+    ipcRenderer.on('browser:url-changed', l)
+    return () => ipcRenderer.removeListener('browser:url-changed', l)
+  },
+})
