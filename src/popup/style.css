@@ -58,6 +58,24 @@
   --error-ink: #b91c1c;
 }
 
+/* ---------- Light-theme contrast ----------
+   The accent gradient is blue→indigo (#0284c7→#6d5ce0) in light mode; near-black
+   text on it fails contrast. Use white text on the accent surface for buttons,
+   active tabs, the chat bubble/composer, and the accent file icon. */
+[data-theme="light"] .tabbar button.active,
+[data-theme="light"] button.primary,
+[data-theme="light"] .agent-chat .msg.user,
+[data-theme="light"] .agent-composer button {
+  color: #ffffff;
+}
+[data-theme="light"] .file-icon,
+[data-theme="light"] .brand-mark {
+  color: #ffffff;
+}
+[data-theme="light"] .brand-title span {
+  -webkit-text-fill-color: currentColor;
+}
+
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
 html, body {

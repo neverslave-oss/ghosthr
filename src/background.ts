@@ -9,9 +9,9 @@
  * Settings are read from chrome.storage.local (see src/ai/settings.ts).
  */
 
-import { openDb, addApplication, listApplications, getLatestCvProfile, upsertCvProfile, saveJobScan, saveCurrentScan, getCurrentScan } from './db'
+import { openDb, addApplication, listApplications, getActiveCvProfile, listCvProfiles, setActiveCvProfile, getLatestCvProfile, upsertCvProfile, saveJobScan, saveCurrentScan, getCurrentScan, getJobScanByUrl, type JobScan } from './db'
 import { loadSettings, saveSettings } from './ai/settings'
-import { scanPage, localDetectedToScan, isOfflineScanSparse, type PageScan } from './ai/scanner'
+import { scanPage, localDetectedToScan, isOfflineScanSparse, type PageScan, type ScannedField } from './ai/scanner'
 import { parseCv, type CvParseInput } from './ai/cvocr'
 import { analyze, type ParsedCv } from './ai/verdict'
 import type { DetectedForm } from './content/ats'
@@ -68,6 +68,18 @@ async function handleMessage(msg: any): Promise<any> {
 
     case 'GHOSTHR_SCAN_PAGE': {
       const settings = await loadSettings()
+      const url = msg.url ?? ''
+
+      // Cache-first: if this URL was parsed before and the user did NOT ask to
+      // force a re-scan, reuse the stored scan instead of running the AI again.
+      // The auto-scan on page open uses force=false; an explicit "Scan job page"
+      // action passes force=true to re-parse.
+      const cachedScan = await getJobScanByUrl(url)
+      if (cachedScan && msg.force !== true) {
+        const cached = scanFromJobScan(cachedScan)
+        await saveCurrentScan(cached)
+        return { ok: true, scan: cached, settings, cached: true, offline: false }
+      }
 
       // Tier 1: free offline DOM detection (no LLM). Ask the content script.
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
@@ -107,14 +119,14 @@ async function handleMessage(msg: any): Promise<any> {
         return { ok: true, empty: true, scan, offline }
       }
       await saveJobScan({
-        url: msg.url ?? '',
+        url,
         title: scan.jobTitle,
         company: scan.company,
         description: scan.jobDescription,
         fields_json: JSON.stringify(scan.fields),
       })
       await saveCurrentScan(scan)
-      return { ok: true, scan, settings, offline }
+      return { ok: true, scan, settings, offline, cached: false }
     }
 
     case 'GHOSTHR_SCAN_IMAGE': {
@@ -129,19 +141,27 @@ async function handleMessage(msg: any): Promise<any> {
       if (!msg.imageDataUrl || typeof msg.imageDataUrl !== 'string') {
         return { ok: false, error: 'GHOSTHR_SCAN_IMAGE requires imageDataUrl' }
       }
+      const url = msg.url ?? ''
+      // Idempotent: reuse a prior scan for this URL unless explicitly forcing.
+      const cachedScan = await getJobScanByUrl(url)
+      if (cachedScan && msg.force !== true) {
+        const cached = scanFromJobScan(cachedScan)
+        await saveCurrentScan(cached)
+        return { ok: true, scan: cached, settings, cached: true, offline: false }
+      }
       const scan = await scanPage({ settings, screenshotDataUrl: msg.imageDataUrl })
       if (!scan.jobDescription && !scan.fields.length) {
         return { ok: true, empty: true, scan, offline: false }
       }
       await saveJobScan({
-        url: msg.url ?? '',
+        url,
         title: scan.jobTitle,
         company: scan.company,
         description: scan.jobDescription,
         fields_json: JSON.stringify(scan.fields),
       })
       await saveCurrentScan(scan)
-      return { ok: true, scan, settings, offline: false }
+      return { ok: true, scan, settings, offline: false, cached: false }
     }
 
     case 'GHOSTHR_GET_CURRENT_SCAN': {
@@ -164,12 +184,12 @@ async function handleMessage(msg: any): Promise<any> {
 
     case 'GHOSTHR_AGENT_CONTEXT': {
       // Full context bundle for the deep agent (desktop Agent tab). Returns
-      // the current scan, latest CV, tracked applications, and provider
+      // the current scan, active CV, tracked applications, and provider
       // settings so the in-process LangGraph agent can gather real data via
       // its tools. Also computes the deterministic baseline verdict
       // (analyze()) which the deep agent AUGMENTS (never replaces).
       const scan = (await getCurrentScan()) as PageScan | null
-      const profile = await getLatestCvProfile()
+      const profile = await getActiveCvProfile()
       let cv: ParsedCv | null = null
       if (profile?.parsed_json) {
         try { cv = JSON.parse(profile.parsed_json) } catch { cv = null }
@@ -192,7 +212,20 @@ async function handleMessage(msg: any): Promise<any> {
     }
 
     case 'GHOSTHR_GET_CV': {
-      return { ok: true, cv: await getLatestCvProfile() }
+      // Returns the ACTIVE (selected) profile, not just the latest.
+      return { ok: true, cv: await getActiveCvProfile() }
+    }
+
+    case 'GHOSTHR_LIST_CV': {
+      return { ok: true, profiles: await listCvProfiles() }
+    }
+
+    case 'GHOSTHR_SET_ACTIVE_CV': {
+      if (typeof msg.id !== 'number') {
+        return { ok: false, error: 'GHOSTHR_SET_ACTIVE_CV requires a numeric id' }
+      }
+      await setActiveCvProfile(msg.id)
+      return { ok: true }
     }
 
     case 'GHOSTHR_GET_SETTINGS': {
@@ -235,4 +268,22 @@ async function captureActiveTab(): Promise<string> {
     format: 'png',
   })
   return dataUrl
+}
+
+/** Replay a stored JobScan row back into the PageScan shape the popup expects. */
+function scanFromJobScan(scan: JobScan): PageScan {
+  let fields: ScannedField[] = []
+  try {
+    const raw = JSON.parse(scan.fields_json)
+    if (Array.isArray(raw)) fields = raw as ScannedField[]
+  } catch {
+    fields = []
+  }
+  return {
+    jobTitle: scan.title,
+    company: scan.company,
+    jobDescription: scan.description,
+    fields,
+    applyUrl: undefined,
+  }
 }
