@@ -1,5 +1,48 @@
 import { describe, expect, it } from 'vitest'
-import { parseScanJson, localDetectedToScan, type PageScan } from '../src/ai/scanner'
+import { parseScanJson, localDetectedToScan, isOfflineScanSparse, type PageScan } from '../src/ai/scanner'
+
+describe('isOfflineScanSparse', () => {
+  const mk = (fields: number, description = 'Some job description text'): PageScan => ({
+    jobTitle: '',
+    company: '',
+    jobDescription: description,
+    fields: Array.from({ length: fields }, (_, i) => ({ label: `Field ${i}`, kind: 'input', required: true })),
+  })
+
+  it('is sparse when there are no fields', () => {
+    expect(isOfflineScanSparse(mk(0))).toBe(true)
+  })
+
+  it('is sparse when null/undefined', () => {
+    expect(isOfflineScanSparse(null)).toBe(true)
+    expect(isOfflineScanSparse(undefined)).toBe(true)
+  })
+
+  it('is sparse when the offline pass recovered only a couple of fields', () => {
+    expect(isOfflineScanSparse(mk(1))).toBe(true)
+    expect(isOfflineScanSparse(mk(2))).toBe(true)
+  })
+
+  it('is sparse when there is no job description', () => {
+    expect(isOfflineScanSparse(mk(6, ''))).toBe(true)
+  })
+
+  it('is NOT sparse with a solid field set + description', () => {
+    expect(isOfflineScanSparse(mk(6))).toBe(false)
+    expect(isOfflineScanSparse(localDetectedToScan({
+      provider: 'workable',
+      descriptionText: 'We are looking for a senior engineer.',
+      fields: [
+        { kind: 'input', label: 'First name', required: true },
+        { kind: 'input', label: 'Last name', required: true },
+        { kind: 'input', label: 'Email', required: true },
+        { kind: 'input', label: 'Phone', required: true },
+        { kind: 'input', label: 'LinkedIn', required: false },
+        { kind: 'textarea', label: 'Cover letter', required: false },
+      ],
+    }))).toBe(false)
+  })
+})
 
 describe('localDetectedToScan', () => {
   it('converts offline DOM detection into a PageScan (no LLM)', () => {
