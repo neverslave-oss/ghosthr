@@ -23,8 +23,13 @@
       "preload.js",
       "renderer/**/*",
       "agent/**/*",
-      "build/**/*",
-      "../dist/**/*"
+      "build/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "../dist",
+        "to": "dist"
+      }
     ],
     "directories": {
       "output": "release"

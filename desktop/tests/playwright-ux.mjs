@@ -25,11 +25,16 @@ fs.mkdirSync(OUT, { recursive: true })
 const fail = (msg) => { console.error('✗ FAIL:', msg); process.exitCode = 1 }
 const pass = (msg) => console.log('✓', msg)
 
-const app = await electron.launch({
-  executablePath: path.join(DESKTOP, 'node_modules', 'electron', 'dist', 'electron.exe'),
-  args: ['.'],
-  cwd: DESKTOP,
-})
+// Set GHOSTHR_EXE to validate a packaged build (e.g. release/win-unpacked/ghostHR.exe).
+const app = await electron.launch(
+  process.env.GHOSTHR_EXE
+    ? { executablePath: process.env.GHOSTHR_EXE, args: [] }
+    : {
+        executablePath: path.join(DESKTOP, 'node_modules', 'electron', 'dist', 'electron.exe'),
+        args: ['.'],
+        cwd: DESKTOP,
+      },
+)
 
 try {
   // Wait for all three webContents (chrome, browser page, side panel).
