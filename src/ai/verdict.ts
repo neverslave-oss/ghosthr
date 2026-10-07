@@ -196,6 +196,35 @@ function buildGapAnalysis(cv: ParsedCv): string[] {
   return gaps
 }
 
+/** A suggested learning/action verb for a missing skill (used in guidance). */
+const LEARNING_VERBS: Record<string, string> = {
+  docker: 'containerise a small app',
+  kubernetes: 'deploy a multi-service app to a local cluster',
+  terraform: 'define cloud infrastructure as code',
+  aws: 'deploy a real workload on AWS',
+  gcp: 'deploy a real workload on GCP',
+  azure: 'deploy a real workload on Azure',
+  go: 'build a small CLI or HTTP service in Go',
+  rust: 'ship a small Rust CLI or service',
+  python: 'build a small script/tool that automates a real task',
+  typescript: 'build a typed TypeScript app end to end',
+  javascript: 'build a small interactive JS app',
+  react: 'build a small interactive app with React',
+  vue: 'build a small interactive app with Vue',
+  node: 'build a small backend service on Node',
+  sql: 'model + query a small relational dataset',
+  postgres: 'model + query a small Postgres schema',
+  mysql: 'model + query a small MySQL schema',
+  mongodb: 'model a small document collection',
+  'machine learning': 'train and evaluate a small model on a real dataset',
+  'ci/cd': 'wire a pipeline that builds and deploys a change',
+}
+
+function learningPathFor(skill: string): string | null {
+  const key = skill.toLowerCase().trim()
+  return LEARNING_VERBS[key] ?? null
+}
+
 function buildHoldBackActions(
   jobText: string,
   cv: ParsedCv,
@@ -211,10 +240,14 @@ function buildHoldBackActions(
       ? missingSkills.slice(0, 3).join(', ')
       : cv.skills.join(', ') || 'core'
     const effort = missingSkills.length >= 3 ? 10 : missingSkills.length === 2 ? 6 : 4
+    const top = missingSkills[0]
+    const verb = top ? learningPathFor(top) : null
     actions.push({
       action: 'study',
       detail: missingSkills.length
-        ? `The role emphasizes ${targets} — not on your CV yet. Plan focused work to close at least the top gap before applying.`
+        ? verb
+          ? `The role emphasizes ${targets} — not on your CV yet. Close the top gap first: ${verb}, then add it to the skills section before applying.`
+          : `The role emphasizes ${targets} — not on your CV yet. Plan focused work to close at least the top gap before applying.`
         : `Strengthen ${targets} skills that the role emphasizes before applying.`,
       est_effort_days: effort,
     })
@@ -222,21 +255,30 @@ function buildHoldBackActions(
   if (!cv.projects?.length) {
     actions.push({
       action: 'portfolio',
-      detail: 'Add 1-2 concrete projects that demonstrate the skills in the job description.',
+      detail: 'Add 1-2 concrete projects that demonstrate the skills in the job description — e.g. one short deployment you can point to. Name the exact stack from the listing so the recruiter sees it instantly.',
       est_effort_days: 5,
+    })
+  } else {
+    // Projects exist — nudge the candidate to surface the relevant one for
+    // the specific role rather than re-adding a generic portfolio. This is
+    // job-aware and concrete.
+    actions.push({
+      action: 'portfolio',
+      detail: `You have projects on file. Lead with the one closest to this role's stack (${jobText ? jobRequiredSkills(jobText).slice(0, 2).join(', ') || 'the listed tech' : 'the listed tech'}) and write 2 lines of results under it.`,
+      est_effort_days: 1,
     })
   }
   if (gaps.some((g) => g.includes('years'))) {
     actions.push({
       action: 'reframe',
-      detail: 'Reframe your CV to emphasize results and years of relevant work even if title history is mixed.',
+      detail: 'Reframe your CV to emphasize results and years of relevant work even if title history is mixed — put the most relevant years first and quantify outcomes.',
       est_effort_days: 1,
     })
   }
   if (actions.length === 0) {
     actions.push({
       action: 'network',
-      detail: 'Find 1-2 people at the company to learn about the team before applying.',
+      detail: 'Find 1-2 people at the company to learn about the team before applying. Ask one targeted question about the role so your application references real insight.',
       est_effort_days: 2,
     })
   }

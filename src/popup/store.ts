@@ -7,6 +7,7 @@
  */
 import { computed, reactive, ref } from 'vue'
 import { analyze, type ParsedCv, type Verdict } from '../ai/verdict'
+import type { CvProfile } from '../db'
 import { PROVIDER_CATALOG, PROVIDER_ORDER, routeLlm, type ProviderId } from '../ai/providers'
 import { hasUsableProvider, type Settings, type ThemePref } from '../ai/settings'
 import { getProviderModels, type ModelChoice } from '../ai/models'
@@ -43,6 +44,10 @@ export function usePopupStore() {
   const cv = ref<ParsedCv | null>(null)
   const cvFileName = ref('')
   const cvKind = ref<CvFileKind>('pdf')
+
+  // Multi-CV support: every saved profile + which one is active for scoring.
+  const cvList = ref<CvProfile[]>([])
+  const activeCvId = ref<number | null>(null)
 
   // Tracked
   const applications = ref<any[]>([])
@@ -179,22 +184,26 @@ export function usePopupStore() {
   const provider = (pid: ProviderId) => settings.value?.providers.find((p) => p.id === pid)
 
   // ---------- Scan ----------
-  async function scanPage() {
+  // force=true re-parses the page even if a cached scan exists for that URL.
+  async function scanPage(force = false) {
     loading.value = true
-    setStatus('Scanning page with AI vision…')
+    setStatus(force ? 'Re-scanning page…' : (scan.value && scan.value.jobDescription ? 'Reloading cached scan…' : 'Scanning page with AI vision…'))
     verdict.value = null
     scan.value = null
     try {
       const urlRes = await send({ type: 'GHOSTHR_GET_CURRENT_URL' })
-      const res = await send({ type: 'GHOSTHR_SCAN_PAGE' })
+      const url = urlRes.url ?? ''
+      const res = await send({ type: 'GHOSTHR_SCAN_PAGE', force, url })
       if (res.empty || !res.scan?.jobDescription) {
         setStatus('No job advert detected on this page.', true)
         return
       }
       const s: PageScan = res.scan
       scan.value = s
-      scannedUrl.value = urlRes.url ?? ''
-      if (s.applyUrl) {
+      scannedUrl.value = url
+      if (res.cached) {
+        setStatus('Loaded previously-parsed scan for this URL.')
+      } else if (s.applyUrl) {
         setStatus('Job advert detected — open the application form to extract fields.')
       } else {
         setStatus(res.offline
@@ -207,6 +216,7 @@ export function usePopupStore() {
       loading.value = false
     }
   }
+
 
   // ---------- CV upload -> OCR parse ----------
   async function onCvFile(event: Event) {
@@ -235,7 +245,12 @@ export function usePopupStore() {
       const res = await send(parseMsg)
       if (!res.ok) throw new Error(res.error)
       cv.value = res.cv
+      // The just-uploaded CV becomes the active one for "score my fit" AND is
+      // persisted (upsertCvProfile marks it active) so it survives reopen.
+      await loadCvList()
+      activeCvId.value = res.id ?? null
       setStatus('CV parsed — ready to autofill.')
+
     } catch (e: any) {
       setStatus(`CV parse failed: ${e?.message ?? e}`, true)
     } finally {
@@ -260,6 +275,33 @@ export function usePopupStore() {
     } finally {
       loading.value = false
     }
+  }
+
+  async function loadCvList() {
+    const res = await send({ type: 'GHOSTHR_LIST_CV' })
+    cvList.value = res.profiles ?? []
+  }
+
+  /** The currently-active CvProfile row (if any). */
+  function activeCvProfile(): CvProfile | null {
+    return cvList.value.find((p) => p.id === activeCvId.value) ?? cvList.value[0] ?? null
+  }
+
+  /** Load a chosen CV into cv.value and mark it active in the DB. */
+  async function selectCv(profile: CvProfile) {
+    await send({ type: 'GHOSTHR_SET_ACTIVE_CV', id: profile.id })
+    activeCvId.value = profile.id
+    try {
+      const parsed: ParsedCv = JSON.parse(profile.parsed_json)
+      cv.value = parsed
+    } catch {
+      cv.value = null
+    }
+    cvFileName.value = profile.name ?? ''
+    cvKind.value = detectCvKind(cvFileName.value, '')
+    setStatus(`Active CV set to ${profile.name || `#${profile.id}`}.`)
+    // Keep the list in sync (active flags updated server-side).
+    await loadCvList()
   }
 
   // ---------- Autofill ----------
@@ -449,10 +491,12 @@ export function usePopupStore() {
 
   async function restoreCv() {
     try {
-      const res = await send({ type: 'GHOSTHR_GET_CV' })
-      // GET_CV returns a stored CvProfile ({ id, name, raw_text, parsed_json });
-      // the parsed CV is JSON-encoded in parsed_json. Unwrap it back into the
-      // ParsedCv shape the rest of the store/autofill expects.
+      const [listRes, res] = await Promise.all([
+        send({ type: 'GHOSTHR_LIST_CV' }),
+        send({ type: 'GHOSTHR_GET_CV' }),
+      ])
+      cvList.value = listRes.profiles ?? []
+      // GET_CV returns the ACTIVE profile (falls back to latest pre-flag).
       const profile: any = res?.cv
       if (profile?.parsed_json) {
         try {
@@ -462,6 +506,7 @@ export function usePopupStore() {
           // ignore corrupt stored JSON
         }
       }
+      activeCvId.value = profile?.id ?? cvList.value[0]?.id ?? null
       cvFileName.value = profile?.name ?? cv.value?.name ?? ''
       cvKind.value = detectCvKind(cvFileName.value, '')
     } catch {
@@ -498,6 +543,7 @@ export function usePopupStore() {
   return reactive({
     tab, status, statusError, loading,
     settings, scan, scannedUrl, verdict, cv, cvFileName, cvKind, applications,
+    cvList, activeCvId, activeCvProfile, loadCvList, selectCv,
     modelChoices, modelLoading, recClass, cvShortName,
     agentMessages, agentBusy, agentMode,
     provider, staticModels, hasUsable, cycleTheme,

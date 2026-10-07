@@ -120,4 +120,43 @@ describe('analyze — recommendation', () => {
       expect(study.detail.toLowerCase()).not.toMatch(/react.*not on your cv|node.*not on your cv/)
     }
   })
+
+  it('study guidance names the top gap and a concrete learning path', () => {
+    const v = analyze({
+      jobText: 'Platform engineer. We use Docker, Kubernetes and Terraform for the backend.',
+      cv: { skills: ['typescript', 'react'], years_experience: 3, projects: ['x'] },
+    })
+    const study = v.hold_back_actions.find((a) => a.action === 'study')
+    expect(study).toBeTruthy()
+    // Full label + effort estimate are present.
+    expect(study!.detail.toLowerCase()).toMatch(/docker/)
+    expect(study!.est_effort_days).toBeGreaterThan(0)
+    // Should offer a concrete learning verb for a known missing skill.
+    expect(study!.detail.toLowerCase()).toMatch(/containerise|deploy a multi-service|define cloud/)
+  })
+
+  it('portfolio guidance is job-aware and references the listing stack when projects exist', () => {
+    const v = analyze({
+      jobText: 'Full-stack role using React, Node and PostgreSQL.',
+      cv: { skills: ['typescript', 'react', 'node'], years_experience: 3, projects: ['built a dash'] },
+    })
+    const portfolio = v.hold_back_actions.find((a) => a.action === 'portfolio')
+    expect(portfolio).toBeTruthy()
+    // With projects present, the guidance points at the closest one instead of
+    // a generic "add a project" nudge, and references the role stack.
+    expect(portfolio!.detail.toLowerCase()).toMatch(/lead with the one closest/i)
+    expect(portfolio!.detail.toLowerCase()).toMatch(/react|node|postgresql/)
+    expect(portfolio!.est_effort_days).toBeLessThan(5)
+  })
+
+  it('generic portfolio nudge when the cv has no projects', () => {
+    const v = analyze({
+      jobText: 'We need TypeScript and React.',
+      cv: { skills: ['typescript', 'react'], years_experience: 3 },
+    })
+    const portfolio = v.hold_back_actions.find((a) => a.action === 'portfolio')
+    expect(portfolio).toBeTruthy()
+    expect(portfolio!.detail.toLowerCase()).toMatch(/add 1-2 concrete projects/i)
+    expect(portfolio!.est_effort_days).toBe(5)
+  })
 })
