@@ -115,17 +115,6 @@ function showMainWindow() {
   mainWindow.focus()
 }
 
-app.whenReady().then(async () => {
-  await loadGhostHrExtension()
-  createWindow()
-  createTray()
-
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
-    else showMainWindow()
-  })
-})
-
 app.on('before-quit', () => { isQuitting = true })
 
 app.on('window-all-closed', () => {
