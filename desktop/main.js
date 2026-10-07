@@ -1,16 +1,18 @@
 /**
  * ghostHR desktop — main process.
  *
- * Creates a BrowserWindow with an integrated browser tab (a webview that can
- * navigate any page) and an Agent chat tab. Loads the BUILT ghostHR extension
- * (from ../dist) into the shared session so its content scripts run on the
- * pages opened in the browser tab.
+ * Creates a BaseWindow whose contentView hosts two WebContentsView children:
+ * the DOM renderer (header/urlbar/tabs/chat) and a native embedded browser
+ * (desktop/browser.js) that can navigate any page. Loads the BUILT ghostHR
+ * extension (from ../dist) into the default session so its content scripts
+ * run on the pages opened in the embedded browser view (Electron's recommended
+ * replacement for the legacy <webview>).
  *
  * The packaged app expects ../dist (the built extension) to be bundled in via
  * electron-builder "files". In dev, run `npm run build` in the repo root first
  * so ../dist exists.
  */
-const { app, BrowserWindow, session, ipcMain, Tray, Menu, nativeImage } = require('electron')
+const { app, BaseWindow, WebContentsView, session, ipcMain, Tray, Menu, nativeImage } = require('electron')
 const path = require('node:path')
 const fs = require('node:fs')
 const http = require('node:http')
@@ -26,11 +28,16 @@ const { Vfs } = require('./agent/vfs')
 const { webSearch } = require('./agent/webSearch')
 
 const DEV = !app.isPackaged
+
+// Native WebContentsView browser controller (replaces the renderer <webview>).
+const { BrowserController } = require('./browser')
 const EXT_DIR = DEV
   ? path.resolve(__dirname, '../dist') // repo-root dist during `npm start`
   : path.join(process.resourcesPath, 'dist')
 
-let mainWindow = null
+let win = null              // BaseWindow (owns contentView for UI + browser views)
+let uiView = null           // WebContentsView hosting the DOM renderer (full window)
+let browserCtl = null       // Native WebContentsView browser controller
 let loadedExtId = null
 let tray = null
 let isQuitting = false
@@ -62,35 +69,52 @@ async function loadGhostHrExtension() {
 }
 
 function createWindow() {
-  mainWindow = new BrowserWindow({
+  win = new BaseWindow({
     width: 1280,
     height: 860,
     title: 'ghostHR',
     // Same icon as the extension (single-icon identity).
     icon: path.join(__dirname, 'build', 'icon.png'),
+  })
+
+  // UI view — full-window WebContentsView that renders the DOM shell
+  // (header/urlbar/tabs/chat/theme toggle). Browser chrome stays here.
+  uiView = new WebContentsView({
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      // Allow <webview> for the integrated browser tab.
-      webviewTag: true,
     },
   })
+  win.contentView.addChildView(uiView)
+  uiView.webContents.loadFile(path.join(__dirname, 'renderer', 'index.html'))
 
-  mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'))
+  // Embedded browser view — a native WebContentsView using the DEFAULT session
+  // (shared with the loaded ghostHR extension) so its content scripts run on
+  // the pages shown here. Positioned over the browser region via renderer-
+  // reported bounds (IPC) on boot, resize, and tab switch.
+  browserCtl = new BrowserController({
+    sendToRenderer: (channel, payload) => {
+      try { if (uiView) uiView.webContents.send(channel, payload) } catch { /* closed */ }
+    },
+  })
+  browserCtl.create(win)
+  browserCtl.registerIpc()
 
   // Close (X) hides to the system tray instead of quitting, so the app stays
   // resident and one tray click brings it back. True quit only happens via the
   // tray menu / app.quit(), which sets isQuitting.
-  mainWindow.on('close', (e) => {
+  win.on('close', (e) => {
     if (!isQuitting) {
       e.preventDefault()
-      mainWindow.hide()
+      win.hide()
     }
   })
 
-  mainWindow.on('closed', () => {
-    mainWindow = null
+  win.on('closed', () => {
+    if (browserCtl) { browserCtl.destroy(); browserCtl = null }
+    win = null
+    uiView = null
   })
 }
 
@@ -110,9 +134,9 @@ function createTray() {
 }
 
 function showMainWindow() {
-  if (!mainWindow) { createWindow(); return }
-  mainWindow.show()
-  mainWindow.focus()
+  if (!win) { createWindow(); return }
+  win.show()
+  win.focus()
 }
 
 app.on('before-quit', () => { isQuitting = true })
@@ -148,8 +172,8 @@ async function getExtensionContextViaBridge() {
   // Ask the renderer to fetch the latest extension context (scan+CV+apps+
   // settings) through the content-script bridge, then send it back here.
   // Implemented via the renderer's pullAgentContext() exposed to main.
-  if (!mainWindow) return null
-  const ctx = await mainWindow.webContents.executeJavaScript(
+  if (!uiView) return null
+  const ctx = await uiView.webContents.executeJavaScript(
     `(async () => { try { return await window.__ghosthrPullAgentContext(); } catch(e) { return { ok:false, error:String(e&&e.message) }; } })()`,
   )
   return ctx
@@ -311,7 +335,7 @@ app.whenReady().then(async () => {
   startAgentBridge()
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    if (BaseWindow.getAllWindows().length === 0) createWindow()
     else showMainWindow()
   })
 })
