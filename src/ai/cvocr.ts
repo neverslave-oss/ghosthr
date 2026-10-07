@@ -147,9 +147,16 @@ export async function parseCv(input: CvParseInput): Promise<ParsedCv> {
           { role: 'user' as const, content },
         ]
       },
-      { signal: input.signal, maxTokens: 1024 },
+      // High output budget so a long CV + its parsed fields aren't cut at
+      // the model layer (which then gets stored and scored / shown truncated).
+      { signal: input.signal, maxTokens: 16000 },
     )
-    return parseCvJson(result.result.text)
+    const parsed = parseCvJson(result.result.text)
+    // Keep the FULL uploaded text (pdf/docx path) as raw_text, not a short
+    // model summary — scoring, autofill and [view raw] all read raw_text, and
+    // a condensed summary silently truncated them.
+    if (input.text && input.text.trim()) parsed.raw_text = input.text
+    return parsed
   } catch (e: any) {
     // Standalone fallback: if we have local text (pdf/docx) and the LLM path
     // failed (no provider, offline, or an error), parse heuristically instead of
@@ -207,7 +214,9 @@ export function parseCvLocally(text: string): ParsedCv {
     years_experience,
     education: education.length ? education : undefined,
     projects: projects.length ? projects : undefined,
-    raw_text: summary || t.slice(0, 2000),
+    // Keep the full raw text (not a 2000-char slice) so autofill + scoring +
+    // [view raw] all see the real CV; truncation here degraded all of them.
+    raw_text: summary || t,
   }
 }
 

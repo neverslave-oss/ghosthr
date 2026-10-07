@@ -77,8 +77,16 @@ async function handleMessage(msg: any): Promise<any> {
       const cachedScan = await getJobScanByUrl(url)
       if (cachedScan && msg.force !== true) {
         const cached = scanFromJobScan(cachedScan)
-        await saveCurrentScan(cached)
-        return { ok: true, scan: cached, settings, cached: true, offline: false }
+        // A zero-fields scan means we parsed the page BEFORE its form rendered
+        // (modern single-page ATS: the form appears only after client-side
+        // interaction). Serving that as canonical would keep the fields empty
+        // forever on the SAME url — exactly the elevenlabs.io bug. Only reuse a
+        // cached scan that actually captured fields; otherwise fall through and
+        // re-parse (a later pass on the same url can now see the form).
+        if (cached.fields.length > 0) {
+          await saveCurrentScan(cached)
+          return { ok: true, scan: cached, settings, cached: true, offline: false }
+        }
       }
 
       // Tier 1: free offline DOM detection (no LLM). Ask the content script.
@@ -118,13 +126,19 @@ async function handleMessage(msg: any): Promise<any> {
       if (!scan.jobDescription && !scan.fields.length) {
         return { ok: true, empty: true, scan, offline }
       }
-      await saveJobScan({
-        url,
-        title: scan.jobTitle,
-        company: scan.company,
-        description: scan.jobDescription,
-        fields_json: JSON.stringify(scan.fields),
-      })
+      // Don't persist a field-less scan (overview page, or an SPA parsed before
+      // its form rendered) as the canonical cache — otherwise cache-first would
+      // keep returning it and fields would stay empty on this url. Only cache
+      // a scan that actually recovered fields.
+      if (scan.fields.length > 0) {
+        await saveJobScan({
+          url,
+          title: scan.jobTitle,
+          company: scan.company,
+          description: scan.jobDescription,
+          fields_json: JSON.stringify(scan.fields),
+        })
+      }
       await saveCurrentScan(scan)
       return { ok: true, scan, settings, offline, cached: false }
     }
@@ -146,20 +160,27 @@ async function handleMessage(msg: any): Promise<any> {
       const cachedScan = await getJobScanByUrl(url)
       if (cachedScan && msg.force !== true) {
         const cached = scanFromJobScan(cachedScan)
-        await saveCurrentScan(cached)
-        return { ok: true, scan: cached, settings, cached: true, offline: false }
+        // Only reuse a cached scan that captured fields — a zero-fields scan
+        // (SPA parsed before the form rendered) must not be served as canonical,
+        // or fields stay empty on this url.
+        if (cached.fields.length > 0) {
+          await saveCurrentScan(cached)
+          return { ok: true, scan: cached, settings, cached: true, offline: false }
+        }
       }
       const scan = await scanPage({ settings, screenshotDataUrl: msg.imageDataUrl })
       if (!scan.jobDescription && !scan.fields.length) {
         return { ok: true, empty: true, scan, offline: false }
       }
-      await saveJobScan({
-        url,
-        title: scan.jobTitle,
-        company: scan.company,
-        description: scan.jobDescription,
-        fields_json: JSON.stringify(scan.fields),
-      })
+      if (scan.fields.length > 0) {
+        await saveJobScan({
+          url,
+          title: scan.jobTitle,
+          company: scan.company,
+          description: scan.jobDescription,
+          fields_json: JSON.stringify(scan.fields),
+        })
+      }
       await saveCurrentScan(scan)
       return { ok: true, scan, settings, offline: false, cached: false }
     }
