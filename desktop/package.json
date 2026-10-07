@@ -17,6 +17,7 @@
     "productName": "ghostHR",
     "files": [
       "main.js",
+      "browser.js",
       "preload.js",
       "renderer/**/*",
       "agent/**/*",
