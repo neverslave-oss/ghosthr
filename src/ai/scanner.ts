@@ -16,7 +16,7 @@ import { enabledProviders, type Settings } from './settings'
 
 export interface ScannedField {
   label: string
-  kind: 'input' | 'textarea' | 'select' | 'checkbox'
+  kind: 'input' | 'textarea' | 'select' | 'checkbox' | 'file'
   required: boolean
   /** Value to prefill (from CV) once the scanned-CV OCR has run. */
   value?: string
@@ -132,6 +132,7 @@ function normalizeKind(k: unknown): ScannedField['kind'] {
   if (s.includes('textarea')) return 'textarea'
   if (s.includes('checkbox')) return 'checkbox'
   if (s.includes('select')) return 'select'
+  if (s.includes('file')) return 'file'
   return 'input'
 }
 

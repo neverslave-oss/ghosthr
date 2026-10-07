@@ -9,7 +9,7 @@
  * Settings are read from chrome.storage.local (see src/ai/settings.ts).
  */
 
-import { openDb, addApplication, listApplications, getActiveCvProfile, listCvProfiles, setActiveCvProfile, getLatestCvProfile, upsertCvProfile, saveJobScan, saveCurrentScan, getCurrentScan, getJobScanByUrl, type JobScan } from './db'
+import { openDb, addApplication, listApplications, getActiveCvProfile, listCvProfiles, setActiveCvProfile, getLatestCvProfile, upsertCvProfile, saveJobScan, saveCurrentScan, getCurrentScan, getCurrentScanUrl, getJobScanByUrl, type JobScan } from './db'
 import { loadSettings, saveSettings } from './ai/settings'
 import { scanPage, localDetectedToScan, isOfflineScanSparse, type PageScan, type ScannedField } from './ai/scanner'
 import { parseCv, type CvParseInput } from './ai/cvocr'
@@ -84,13 +84,13 @@ async function handleMessage(msg: any): Promise<any> {
         // cached scan that actually captured fields; otherwise fall through and
         // re-parse (a later pass on the same url can now see the form).
         if (cached.fields.length > 0) {
-          await saveCurrentScan(cached)
+          await saveCurrentScan(cached, url)
           return { ok: true, scan: cached, settings, cached: true, offline: false }
         }
       }
 
       // Tier 1: free offline DOM detection (no LLM). Ask the content script.
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+      const tab = await getActiveWebTab()
       let scan: PageScan | null = null
       let offline = false
       if (tab?.id) {
@@ -119,7 +119,14 @@ async function handleMessage(msg: any): Promise<any> {
 
       // Tier 2: vision LLM fallback (only if offline pass found nothing).
       if (!scan) {
-        const dataUrl = await captureActiveTab()
+        let dataUrl: string
+        try {
+          dataUrl = await captureActiveTab()
+        } catch {
+          // Electron (desktop) has no chrome.tabs.captureVisibleTab — tell the
+          // popup so it can route the screenshot through the shell's bridge.
+          return { ok: false, captureUnavailable: true, error: 'Screen capture unavailable here.' }
+        }
         scan = await scanPage({ settings, screenshotDataUrl: dataUrl })
       }
 
@@ -139,7 +146,7 @@ async function handleMessage(msg: any): Promise<any> {
           fields_json: JSON.stringify(scan.fields),
         })
       }
-      await saveCurrentScan(scan)
+      await saveCurrentScan(scan, url)
       return { ok: true, scan, settings, offline, cached: false }
     }
 
@@ -164,7 +171,7 @@ async function handleMessage(msg: any): Promise<any> {
         // (SPA parsed before the form rendered) must not be served as canonical,
         // or fields stay empty on this url.
         if (cached.fields.length > 0) {
-          await saveCurrentScan(cached)
+          await saveCurrentScan(cached, url)
           return { ok: true, scan: cached, settings, cached: true, offline: false }
         }
       }
@@ -181,12 +188,12 @@ async function handleMessage(msg: any): Promise<any> {
           fields_json: JSON.stringify(scan.fields),
         })
       }
-      await saveCurrentScan(scan)
+      await saveCurrentScan(scan, url)
       return { ok: true, scan, settings, offline: false, cached: false }
     }
 
     case 'GHOSTHR_GET_CURRENT_SCAN': {
-      return { ok: true, scan: (await getCurrentScan()) ?? null }
+      return { ok: true, scan: (await getCurrentScan()) ?? null, url: await getCurrentScanUrl() }
     }
 
     case 'GHOSTHR_PARSE_CV': {
@@ -224,7 +231,15 @@ async function handleMessage(msg: any): Promise<any> {
     }
 
     case 'GHOSTHR_ADD_APPLICATION': {
-      const id = await addApplication(msg.application)
+      const appIn = msg.application ?? {}
+      // Dedupe: the same job URL (or company+role when no URL) is one application.
+      const existing = (await listApplications()).find((a) =>
+        appIn.job_url && a.job_url
+          ? a.job_url === appIn.job_url
+          : a.company === appIn.company && a.role === appIn.role,
+      )
+      if (existing) return { ok: true, id: existing.id, duplicate: true }
+      const id = await addApplication(appIn)
       return { ok: true, id }
     }
 
@@ -260,18 +275,19 @@ async function handleMessage(msg: any): Promise<any> {
     }
 
     case 'GHOSTHR_GET_CURRENT_URL': {
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+      const tab = await getActiveWebTab()
       return { ok: true, url: tab?.url ?? '' }
     }
 
     case 'GHOSTHR_AUTOFILL': {
       // Route to the content script on the active tab for DOM autofill.
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+      const tab = await getActiveWebTab()
       if (!tab?.id) throw new Error('No active tab')
       const res = await chrome.tabs.sendMessage(tab.id, {
         type: 'GHOSTHR_AUTOFILL',
         fields: msg.fields ?? [],
         cv: msg.cv ?? { skills: [] },
+        generated: msg.generated ?? [],
       })
       return { ok: true, filled: res?.filled ?? 0 }
     }
@@ -281,9 +297,34 @@ async function handleMessage(msg: any): Promise<any> {
   }
 }
 
+/**
+ * Resolve the tab scans/autofill should target. Layered because Electron's
+ * chrome.tabs.query is only partial (currentWindow unsupported) and in the
+ * desktop every webContents (shell chrome, side panel) registers as a tab —
+ * always prefer an http(s) page over extension/file surfaces.
+ */
+async function getActiveWebTab(): Promise<chrome.tabs.Tab | null> {
+  const isWeb = (t: chrome.tabs.Tab) => !!t.url && /^https?:/i.test(t.url)
+  try {
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true })
+    const web = tabs.find(isWeb)
+    if (web) return web
+  } catch { /* partial tabs API (desktop) */ }
+  try {
+    const tabs = await chrome.tabs.query({ active: true })
+    const web = tabs.find(isWeb)
+    if (web) return web
+  } catch { /* ignore */ }
+  try {
+    const all = await chrome.tabs.query({})
+    return all.find(isWeb) ?? null
+  } catch { /* ignore */ }
+  return null
+}
+
 /** Capture the visible (or full-page) active tab as a PNG data URL. */
 async function captureActiveTab(): Promise<string> {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+  const tab = await getActiveWebTab()
   if (!tab?.id) throw new Error('No active tab')
   const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId ?? chrome.windows.WINDOW_ID_CURRENT, {
     format: 'png',

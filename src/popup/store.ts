@@ -192,8 +192,24 @@ export function usePopupStore() {
     scan.value = null
     try {
       const urlRes = await send({ type: 'GHOSTHR_GET_CURRENT_URL' })
-      const url = urlRes.url ?? ''
-      const res = await send({ type: 'GHOSTHR_SCAN_PAGE', force, url })
+      let url = urlRes.url ?? ''
+      let res = await send({ type: 'GHOSTHR_SCAN_PAGE', force, url })
+      // Desktop fallback: Electron has no chrome.tabs.captureVisibleTab, so
+      // when the in-extension scan can't deliver, capture through the desktop
+      // shell's bridge and run the same vision pipeline on that image.
+      if ((!res?.ok || res.empty || !res.scan?.jobDescription) && (await desktopAgentHealth())) {
+        try {
+          const cap = await (await fetch(`${AGENT_BRIDGE}/capture`)).json()
+          if (cap?.ok && cap.dataUrl) {
+            if (cap.url) url = cap.url
+            res = await send({ type: 'GHOSTHR_SCAN_IMAGE', imageDataUrl: cap.dataUrl, url, force })
+          }
+        } catch { /* bridge capture unavailable — fall through to the result we have */ }
+      }
+      if (!res?.ok) {
+        setStatus(`Scan failed: ${res?.error || 'unknown error'}`, true)
+        return
+      }
       if (res.empty || !res.scan?.jobDescription) {
         setStatus('No job advert detected on this page.', true)
         return
@@ -310,6 +326,19 @@ export function usePopupStore() {
       setStatus('Need a scan + CV before autofilling.', true)
       return
     }
+    // Stale-scan guard: filling a page with answers scanned from a different
+    // site would silently submit wrong data. Same-origin still allows the
+    // overview → /apply/ flow (Workable keeps both on one host).
+    try {
+      const urlRes = await send({ type: 'GHOSTHR_GET_CURRENT_URL' })
+      const origin = (u: string) => { try { return new URL(u).origin } catch { return '' } }
+      const cur = origin(String(urlRes?.url || ''))
+      const scanned = origin(scannedUrl.value)
+      if (cur && scanned && cur !== scanned) {
+        setStatus(`This scan came from ${scanned} but you're on ${cur} — re-scan this page first.`, true)
+        return
+      }
+    } catch { /* URL unavailable — proceed */ }
     loading.value = true
     try {
       // 1. Deterministic CV fields fill instantly (no model round-trip).
@@ -320,7 +349,9 @@ export function usePopupStore() {
       for (const f of scan.value.fields) {
         if (resolveFieldValue(f, cvValueBag(cv.value))) covered.add(f.label)
       }
-      const toGenerate = scan.value.fields.filter((f) => !covered.has(f.label) && f.kind !== 'checkbox')
+      const toGenerate = scan.value.fields.filter(
+        (f) => !covered.has(f.label) && f.kind !== 'checkbox' && f.kind !== 'file',
+      )
 
       let generated: GeneratedField[] = []
       if (settings.value && toGenerate.length) {
@@ -366,7 +397,11 @@ export function usePopupStore() {
           notes: JSON.stringify(verdict.value ?? {}),
         },
       })
-      setStatus(res.ok ? `Tracked application #${res.id}.` : `Error: ${res.error}`)
+      setStatus(
+        res.ok
+          ? (res.duplicate ? `Already tracked (#${res.id}) — no duplicate added.` : `Tracked application #${res.id}.`)
+          : `Error: ${res.error}`,
+      )
       await loadApplications()
     } catch (e: any) {
       setStatus(`Error: ${e?.message ?? e}`, true)
@@ -382,7 +417,10 @@ export function usePopupStore() {
   async function restoreScan() {
     try {
       const res = await send({ type: 'GHOSTHR_GET_CURRENT_SCAN' })
-      if (res?.scan) scan.value = res.scan
+      if (res?.scan) {
+        scan.value = res.scan
+        scannedUrl.value = res.url ?? ''
+      }
     } catch {
       /* no persisted scan yet */
     }

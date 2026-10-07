@@ -8,7 +8,7 @@
  */
 
 export interface AthFormField {
-  kind: 'textarea' | 'input' | 'select' | 'checkbox'
+  kind: 'textarea' | 'input' | 'select' | 'checkbox' | 'file'
   name: string | null
   label: string | null
   placeholder: string | null
@@ -120,6 +120,8 @@ export function looksLikeJobAdvert(bodyText: string): boolean {
  */
 export function looksLikeApplicationForm(fields: AthFormField[], bodyText: string): boolean {
   const textFields = fields.filter((f) => f.kind === 'textarea' || f.kind === 'input')
+  // A file-upload field (CV/resume attach) is the strongest ATS form signal.
+  const hasFileUpload = fields.some((f) => f.kind === 'file')
   const hasJobSignal = /job|position|apply|candidate|application/i.test(bodyText)
-  return textFields.length >= 2 && hasJobSignal
+  return (textFields.length >= 2 || hasFileUpload) && hasJobSignal
 }

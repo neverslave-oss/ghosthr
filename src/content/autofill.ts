@@ -72,18 +72,26 @@ export function findFieldElement(
   field: ScannedField,
   root: Document | HTMLElement = document,
 ): HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement | null {
+  const labelText = (field.label ?? '').trim().toLowerCase()
+  // Never fill without a usable label — a blind fallback would overwrite an
+  // arbitrary (first) input on the page with an unrelated value.
+  if (!labelText) return null
   const candidates = Array.from(
     root.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>(
       'input:not([type=file]):not([type=checkbox]):not([type=radio]), textarea, select',
     ),
   )
-  const labelText = field.label.toLowerCase()
   const byLabel = candidates.filter((el) => {
-    const lbl = (el.closest('label')?.textContent || (el as HTMLElement).getAttribute('aria-label') || '').toLowerCase()
+    const lbl = (el.closest('label')?.textContent || (el as HTMLElement).getAttribute('aria-label') || '')
+      .trim()
+      .toLowerCase()
     const name = (el.getAttribute('name') || el.getAttribute('id') || '').toLowerCase()
-    return lbl.includes(labelText) || labelText.includes(lbl.trim()) || name === labelText
+    return (
+      (lbl.length > 0 && (lbl.includes(labelText) || labelText.includes(lbl))) ||
+      (name.length > 0 && name === labelText)
+    )
   })
-  return byLabel[0] ?? candidates[0] ?? null
+  return byLabel[0] ?? null
 }
 
 export function fillField(field: ScannedField, bag: CvValueBag, root: Document | HTMLElement = document): boolean {

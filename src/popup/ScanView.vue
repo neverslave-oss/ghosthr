@@ -105,6 +105,9 @@ function prettyJson(v: unknown): string {
             <span class="kind">{{ f.kind }}</span>
           </li>
         </ul>
+        <div v-if="s.scan.fields.some((f) => f.kind === 'file')" class="file-note">
+          📎 This form requires a CV/file upload — attach the file manually after autofill.
+        </div>
         <button class="primary" :disabled="s.loading || !s.cv" @click="s.autofill">
           <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
           Autofill form
@@ -137,6 +140,11 @@ function prettyJson(v: unknown): string {
 
 <style scoped>
 .job-title { font-size: 15px; font-weight: 700; color: var(--ink); margin-bottom: 2px; }
+.file-note {
+  font-size: 12px; color: var(--warn); margin: 8px 0;
+  padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px;
+  background: var(--surface-soft);
+}
 .job-company { font-size: 12.5px; color: var(--ink-dim); margin-bottom: 12px; }
 .match { font-size: 15px; font-weight: 800; color: var(--ink); }
 .cv-loaded { color: var(--ok); }

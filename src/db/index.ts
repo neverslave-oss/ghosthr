@@ -49,6 +49,7 @@ const K = {
   cvProfiles: 'ghosthr.cv_profiles',
   jobScans: 'ghosthr.job_scans',
   currentScan: 'ghosthr.current_scan',
+  currentScanUrl: 'ghosthr.current_scan_url',
   seq: 'ghosthr.seq',
 }
 
@@ -201,13 +202,20 @@ export async function getJobScanByUrl(url: string): Promise<JobScan | null> {
   return arr.find((s) => s.url === url) ?? null
 }
 
-/** Persist the currently-active scan so it survives a popup close/reopen. */
-export async function saveCurrentScan(scan: unknown): Promise<void> {
-  await chrome.storage.local.set({ [K.currentScan]: scan })
+/** Persist the currently-active scan (+ source URL) so it survives a popup close/reopen. */
+export async function saveCurrentScan(scan: unknown, url?: string): Promise<void> {
+  await chrome.storage.local.set({ [K.currentScan]: scan, [K.currentScanUrl]: url ?? '' })
 }
 
 /** Read back the persisted current scan (or null). */
 export async function getCurrentScan(): Promise<unknown> {
   const got = await chrome.storage.local.get(K.currentScan)
   return got?.[K.currentScan] ?? null
+}
+
+/** URL the persisted current scan was taken from ('' if unknown). */
+export async function getCurrentScanUrl(): Promise<string> {
+  const got = await chrome.storage.local.get(K.currentScanUrl)
+  const v = got?.[K.currentScanUrl]
+  return typeof v === 'string' ? v : ''
 }

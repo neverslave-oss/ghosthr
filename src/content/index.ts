@@ -34,6 +34,7 @@ function collectFields(): AthFormField[] {
     'input[type="text"]',
     'input[type="email"]',
     'input[type="tel"]',
+    'input[type="file"]',
     'input:not([type])',
     'select',
     'input[type="checkbox"]',
@@ -47,7 +48,9 @@ function collectFields(): AthFormField[] {
           ? 'select'
           : el instanceof HTMLInputElement && el.type === 'checkbox'
             ? 'checkbox'
-            : 'input'
+            : el instanceof HTMLInputElement && el.type === 'file'
+              ? 'file'
+              : 'input'
       const label = html.closest('label')?.textContent?.trim() ?? null
       const name = html.getAttribute('name') || html.getAttribute('id') || null
       const placeholder = html.getAttribute('placeholder') || null
@@ -124,9 +127,9 @@ chrome.runtime?.onMessage?.addListener((msg, _sender, sendResponse) => {
   mountLauncher()
   try {
     const form = detectAndReport()
-    if (form) {
-      chrome.runtime?.sendMessage?.({ type: 'GHOSTHR_JOB_DETECTED', detected: true })
-    }
+    // Always report (true AND false) so the toolbar badge clears when a page
+    // has no job advert instead of lingering from the previous one.
+    chrome.runtime?.sendMessage?.({ type: 'GHOSTHR_JOB_DETECTED', detected: !!form })
   } catch {
     /* badge is best-effort */
   }
