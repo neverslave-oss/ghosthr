@@ -17,6 +17,7 @@ import {
 import { fillField, fillFieldValue, cvValueBag } from './autofill'
 import type { GeneratedField } from '../ai/genfill'
 import type { ParsedCv } from '../ai/verdict'
+import { mountLauncher } from './launcher'
 
 /** Derive a Workable-style apply URL from a job-overview URL (…/j/<id>/ → …/j/<id>/apply/). */
 export function deriveApplyUrl(url: string): string | null {
@@ -116,6 +117,11 @@ chrome.runtime?.onMessage?.addListener((msg, _sender, sendResponse) => {
 // Auto-detect on load and ping the background to show the toolbar badge when a
 // job advert is present on the page.
 ;(async () => {
+  // Mount ghostHR's own in-page UI (floating action + side panel hosting the
+  // real popup). This keeps the extension self-contained on the page — the
+  // same behavior in a standalone browser and in the desktop's browser view —
+  // so the desktop app shell needs no ghostHR-specific chrome of its own.
+  mountLauncher()
   try {
     const form = detectAndReport()
     if (form) {

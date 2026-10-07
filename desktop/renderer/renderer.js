@@ -47,51 +47,15 @@ tabButtons.forEach((b) => {
   b.addEventListener('click', () => switchTab(b.dataset.tab))
 })
 
-// ---------- ghostHR extension side panel ----------
-// Hosts the extension's OWN popup page, loaded via the chrome-extension://
-// scheme, so the user gets the exact same ghostHR UI/settings/verdict they see
-// in a real browser. Requires the extension to be loaded in the shared session
-// and its id returned by the main process.
-const extPanel = document.getElementById('ext-panel')
-const extToggle = document.getElementById('ext-toggle')
-const extClose = document.getElementById('ext-close')
-let extLoaded = false
-
-async function ensureExtPanel() {
-  if (extLoaded) return
-  try {
-    const id = await window.ghosthr.getExtensionId()
-    if (!id) {
-      extPanel.innerHTML = '<div class="sp-head"><span>🛠 ghostHR</span><button id="ext-close">✕</button></div>' +
-        '<p style="padding:16px;color:var(--ink-dim);font-size:13px">ghostHR extension not loaded. Build the extension first (npm run build at repo root).</p>'
-      return
-    }
-    const extView = document.createElement('webview')
-    extView.setAttribute('src', `chrome-extension://${id}/src/popup/index.html`)
-    extPanel.appendChild(extView)
-    extLoaded = true
-  } catch (e) {
-    console.error('[ghostHR] ext panel failed:', e)
-  }
-}
-
-extToggle.addEventListener('click', async () => {
-  await ensureExtPanel()
-  const open = extPanel.classList.toggle('open')
-  extToggle.classList.toggle('active', open)
-})
-extClose.addEventListener('click', () => {
-  extPanel.classList.remove('open')
-  extToggle.classList.remove('active')
-})
-
 // ---------- Browser ----------
 const urlInput = document.getElementById('url-input')
 const goBtn = document.getElementById('go')
 
-// Browser chrome: the ghostHR action icon (pinned like a real browser)
-// lives in the toolbar. The Browser panel IS the primary browsing surface;
-// the extension's side panel is surfaced from there, not an app-header hack.
+// The Browser view loads ghostHR natively via the shared session: its content
+// script renders ghostHR's own in-page UI (floating action + side panel) inside
+// the webview, exactly like the standalone add-on in a real browser. So the
+// desktop shell has no ghostHR-specific chrome of its own — the URL bar,
+// navigation and Capture are the only browser chrome.
 
 function navigate(url) {
   let u = url.trim()
@@ -195,7 +159,7 @@ function formatCoaching(ctx) {
   const v = ctx.verdict
   const cv = ctx.cv
   if (!s?.jobDescription || !cv) {
-    return 'I can only coach once I have both data points:\n\n• Scan a job first — open it in the browser and hit "Capture page"\n• Add your CV in the ghostHR sidebar (🛠)\n\nThen ask me again — e.g. "score my fit".'
+    return 'I can only coach once I have both data points:\n\n• Scan a job first — open it in the browser and hit "Capture page"\n• Add your CV via the ghostHR launcher on the page (the HR button)\n\nThen ask me again — e.g. "score my fit".'
   }
   const recLabel = { apply_now: '✅ Apply now', apply_with_caveats: '⚠️ Apply with caveats', hold_back: '🛑 Hold back' }[v.recommendation] || v.recommendation
   let out = `${recLabel} — match ${v.match_score}/100\n`
@@ -234,7 +198,7 @@ async function runDeepTurn(text, isCoaching) {
     if (isCoaching) {
       try { bubble.set(formatCoaching(await pullAgentContext())) } catch { bubble.set('⚠️ Could not reach the ghostHR engine.') }
     } else {
-      bubble.set('⚠️ Deep agent unavailable (' + ((res && res.error) || ctxErr || 'no provider configured') + '). Open the ghostHR sidebar (🛠) to add a provider.')
+      bubble.set('⚠️ Deep agent unavailable (' + ((res && res.error) || ctxErr || 'no provider configured') + '). Open the ghostHR launcher on the page (HR button) to add a provider.')
     }
   } catch (e) {
     if (isCoaching) { try { bubble.set(formatCoaching(await pullAgentContext())) } catch { bubble.set('⚠️ Could not reach the ghostHR engine.') } }
@@ -258,12 +222,12 @@ async function handleAgent(text) {
     mountWebview(browserHost)
     switchTab('browser')
     navigate(urlMatch[0])
-    appendBot(`Opened ${urlMatch[0]} in the browser. Open the ghostHR sidebar (🛠) to scan/autofill.`)
+    appendBot(`Opened ${urlMatch[0]} in the browser. Use the ghostHR launcher on the page (HR button) to scan/autofill.`)
     return
   }
   if (/(help|what can you)/i.test(lower)) {
     appendBot(
-      'I\'m ghostHR\'s deep-agent coach.\n\nYou can:\n• "open <job-URL>" — browse the page (extension scans/autofills via the 🛠 sidebar)\n• "score my fit" / "should I apply?" — coaching on the scanned job vs your CV\n• "research <company>" — live web research\n\nProviders + CV live in the ghostHR sidebar (🛠), shared with the browser extension.',
+      'I\'m ghostHR\'s deep-agent coach.\n\nYou can:\n• "open <job-URL>" — browse the page (extension scans/autofills via its on-page launcher)\n• "score my fit" / "should I apply?" — coaching on the scanned job vs your CV\n• "research <company>" — live web research\n\nProviders + CV live in the ghostHR launcher (HR button) on the page, shared with the browser extension.',
     )
     return
   }
@@ -305,5 +269,5 @@ initTheme()
 mountWebview(agentBrowserHost)
 
 appendBot(
-  '👋 Welcome to ghostHR desktop.\n\nThis is a real browser with ghostHR loaded natively — hit the 🛠 button in the toolbar to open the extension (settings, CV, verdict) exactly like a browser side panel. Providers + CV sync with the standalone browser extension.\n\nTry "open https://www.workable.com/jobs/123" or open a job page and hit "Capture page".',
+  '👋 Welcome to ghostHR desktop.\n\nThis is a real browser with ghostHR loaded natively into the page — use the ghostHR launcher (HR button) that appears on pages to open the extension (settings, CV, verdict) exactly like a standalone add-on. Providers + CV sync with the standalone browser extension.\n\nTry "open https://www.workable.com/jobs/123" or open a job page and hit "Capture page".',
 )
