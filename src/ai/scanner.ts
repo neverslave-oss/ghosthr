@@ -84,7 +84,12 @@ export async function scanPage(input: ScanProviderInput): Promise<PageScan> {
         ],
       },
     ],
-    { signal: input.signal, maxTokens: 2048 },
+    // High output budget: the prompt asks for the FULL verbatim job
+    // description, and a low maxTokens (e.g. 2048) silently truncates long
+    // adverts at the model layer — which then gets stored and scored,
+    // degrading [view raw] AND the fit verdict. Raise it so descriptions +
+    // field lists aren't cut off.
+    { signal: input.signal, maxTokens: 16000 },
   )
 
   return parseScanJson(result.text)

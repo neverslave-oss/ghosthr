@@ -114,4 +114,14 @@ Led a team of 4 shipping a payments service.`
     expect(Array.isArray(cv.skills)).toBe(true)
     expect(cv.skills.length).toBe(0)
   })
+
+  it('preserves the FULL raw text (not a 2000-char slice) so scoring/[view raw] see the real CV', () => {
+    // A long CV made of short lines (no dominant 40+ char summary) so the local
+    // path keeps raw_text = the whole text, not a slice(0, 2000).
+    const longTail = Array.from({ length: 120 }, (_, i) => `Bullet ${i} detail project context impact`) // <40 chars each
+    const cv = parseCvLocally(longTail.join('\n'))
+    expect(cv.raw_text).toContain('Bullet 0 detail')       // head preserved
+    expect(cv.raw_text).toContain('Bullet 119 detail')     // tail preserved, not sliced
+    expect(cv.raw_text!.length).toBeGreaterThan(2000)      // not truncated at 2000
+  })
 })
