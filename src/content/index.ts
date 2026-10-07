@@ -14,7 +14,8 @@ import {
   type AthFormField,
   type DetectedForm,
 } from './ats'
-import { fillField, cvValueBag } from './autofill'
+import { fillField, fillFieldValue, cvValueBag } from './autofill'
+import type { GeneratedField } from '../ai/genfill'
 import type { ParsedCv } from '../ai/verdict'
 
 /** Derive a Workable-style apply URL from a job-overview URL (…/j/<id>/ → …/j/<id>/apply/). */
@@ -90,11 +91,21 @@ chrome.runtime?.onMessage?.addListener((msg, _sender, sendResponse) => {
     return
   }
   if (msg?.type === 'GHOSTHR_AUTOFILL') {
-    // msg.fields = ScannedField[]; msg.cv = ParsedCv
+    // msg.fields = ScannedField[]; msg.cv = ParsedCv;
+    // msg.generated = { label, value }[] (agent-generated answers for the
+    // fields the deterministic CV mapping can't fill: textareas, questions…)
     const bag = cvValueBag((msg.cv ?? { skills: [] }) as ParsedCv)
     let filled = 0
     for (const field of msg.fields ?? []) {
       if (fillField(field, bag)) filled++
+    }
+    // Then apply agent-generated answers, keyed by exact label. Fill every
+    // generated value even if deterministic already filled it (the generated
+    // value is the richer, tailored answer for free-text/textarea fields).
+    for (const g of (msg.generated ?? []) as GeneratedField[]) {
+      const field = (msg.fields ?? []).find((f: any) => f.label === g.label)
+      const scoped = field ?? { label: g.label, kind: 'input', required: false }
+      if (fillFieldValue(scoped as any, g.value)) filled++
     }
     sendResponse({ ok: true, filled })
     return

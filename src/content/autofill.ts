@@ -67,26 +67,40 @@ export function resolveFieldValue(field: ScannedField, bag: CvValueBag): string 
  * Uses the label text against input/textarea/select elements. Returns true if
  * a value was placed.
  */
-export function fillField(field: ScannedField, bag: CvValueBag, root: Document | HTMLElement = document): boolean {
-  const value = resolveFieldValue(field, bag)
-  if (!value) return false
-
+/** Find the best-matching DOM element for a scanned field label. */
+export function findFieldElement(
+  field: ScannedField,
+  root: Document | HTMLElement = document,
+): HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement | null {
   const candidates = Array.from(
     root.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>(
       'input:not([type=file]):not([type=checkbox]):not([type=radio]), textarea, select',
     ),
   )
-
-  // Prefer elements whose label/label-parent matches the scanned label.
   const labelText = field.label.toLowerCase()
   const byLabel = candidates.filter((el) => {
     const lbl = (el.closest('label')?.textContent || (el as HTMLElement).getAttribute('aria-label') || '').toLowerCase()
     const name = (el.getAttribute('name') || el.getAttribute('id') || '').toLowerCase()
     return lbl.includes(labelText) || labelText.includes(lbl.trim()) || name === labelText
   })
-  const target = byLabel[0] ?? candidates[0]
-  if (!target) return false
+  return byLabel[0] ?? candidates[0] ?? null
+}
 
+export function fillField(field: ScannedField, bag: CvValueBag, root: Document | HTMLElement = document): boolean {
+  const value = resolveFieldValue(field, bag)
+  if (!value) return false
+  return fillFieldValue(field, value, root)
+}
+
+/** Fill a field with an explicit value (used for agent-generated answers). */
+export function fillFieldValue(
+  field: ScannedField,
+  value: string,
+  root: Document | HTMLElement = document,
+): boolean {
+  if (!value) return false
+  const target = findFieldElement(field, root)
+  if (!target) return false
   setDomValue(target, value)
   return true
 }

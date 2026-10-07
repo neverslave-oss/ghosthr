@@ -13,6 +13,8 @@ import { getProviderModels, type ModelChoice } from '../ai/models'
 import type { PageScan } from '../ai/scanner'
 import { detectCvKind, blobToDataUrl, extractDocxText, type CvFileKind } from '../ai/cvocr'
 import { extractPdfText, rasterizePdf } from '../ai/pdftools'
+import { cvValueBag, resolveFieldValue } from '../content/autofill'
+import { generateFieldValues, type GeneratedField } from '../ai/genfill'
 
 export type Tab = 'scan' | 'track' | 'settings' | 'agent'
 type Msg = { type: string; [k: string]: any }
@@ -268,9 +270,36 @@ export function usePopupStore() {
     }
     loading.value = true
     try {
-      const res = await send({ type: 'GHOSTHR_AUTOFILL', fields: scan.value.fields, cv: cv.value })
-      if (res?.ok) setStatus(`Autofilled ${res.filled} field(s).`)
-      else setStatus(`Autofill: ${res?.error}`, true)
+      // 1. Deterministic CV fields fill instantly (no model round-trip).
+      // 2. The agent then generates values for every field the CV can't
+      //    provide directly (textareas, custom questions, cover letter, etc.)
+      //    and those are filled too — one click, everything populated.
+      const covered = new Set<string>()
+      for (const f of scan.value.fields) {
+        if (resolveFieldValue(f, cvValueBag(cv.value))) covered.add(f.label)
+      }
+      const toGenerate = scan.value.fields.filter((f) => !covered.has(f.label) && f.kind !== 'checkbox')
+
+      let generated: GeneratedField[] = []
+      if (settings.value && toGenerate.length) {
+        generated = await generateFieldValues({
+          settings: settings.value,
+          cv: cv.value,
+          jobDescription: scan.value.jobDescription || '',
+          fields: toGenerate,
+        })
+      }
+
+      const res = await send({
+        type: 'GHOSTHR_AUTOFILL',
+        fields: scan.value.fields,
+        cv: cv.value,
+        generated,
+      })
+      if (res?.ok) {
+        const genN = generated.length
+        setStatus(`Autofilled ${res.filled} field(s)${genN ? ` (${genN} AI-generated)` : ''}.`)
+      } else setStatus(`Autofill: ${res?.error}`, true)
     } catch (e: any) {
       setStatus(`Autofill failed: ${e?.message ?? e}`, true)
     } finally {
