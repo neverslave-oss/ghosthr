@@ -16,7 +16,11 @@
 // ---------- Shared webview ----------
 const webview = document.createElement('webview')
 webview.id = 'browser-vw'
-webview.setAttribute('src', 'https://www.google.com')
+// Brave-flavoured in-app browser: Brave Search default + Brave user agent.
+// (Electron's webview always renders with bundled Chromium — not Brave's
+// engine — so this gives a Brave-like identity/search default in-app.)
+webview.setAttribute('src', 'https://search.brave.com')
+webview.setAttribute('useragent', 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Brave/1.60.114')
 webview.setAttribute('allowpopups', 'true')
 
 const browserHost = document.getElementById('tab-browser')
