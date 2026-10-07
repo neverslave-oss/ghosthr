@@ -28,7 +28,7 @@ test.describe('ghostHR popup smoke', () => {
 
       const d = await diagPopup(page)
       // shell + brand
-      expect(d.tabs).toEqual(['Scan', 'Tracked', 'Settings'])
+      expect(d.tabs).toEqual(['Scan', 'Agent', 'Tracked', 'Settings'])
       expect(d.brandGhost).toBe(true)
       // scan view present by default
       expect(d.scanBtn).toBe(true)
@@ -98,7 +98,7 @@ test.describe('ghostHR popup smoke', () => {
       // first run without setupDone -> welcome shown, tabs still usable
       let d = await diagPopup(page)
       expect(d.welcome).toBe(true)
-      expect(d.tabs).toEqual(['Scan', 'Tracked', 'Settings'])
+      expect(d.tabs).toEqual(['Scan', 'Agent', 'Tracked', 'Settings'])
 
       // dismiss via Continue -> welcome gone, Scan active
       await page.evaluate(() => {
