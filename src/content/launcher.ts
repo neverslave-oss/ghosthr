@@ -23,6 +23,9 @@ export function mountLauncher(): void {
   // so the extension renders its own in-page UI (this launcher) to behave
   // like the standalone add-on acting on the page.
   if (!/Electron\//i.test(navigator.userAgent)) return
+  // Never inject into the desktop shell's own chrome page (it hosts the
+  // extension in a dedicated side-panel view already).
+  if (document.documentElement.hasAttribute('data-ghosthr-shell')) return
   if (document.getElementById(HOST_ID)) return
 
   const host = document.createElement('div')

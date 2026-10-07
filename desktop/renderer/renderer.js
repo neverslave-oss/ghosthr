@@ -20,7 +20,8 @@ const tabButtons = document.querySelectorAll('.tabs button')
 const urlBar = document.getElementById('urlbar')
 const browserHost = document.getElementById('tab-browser')
 const agentBrowserHost = document.getElementById('agent-browser')
-let currentTab = 'agent'
+const sidepanelHost = document.getElementById('sidepanel-host')
+let currentTab = 'browser'
 
 function switchTab(name) {
   currentTab = name
@@ -48,14 +49,38 @@ function reportBounds() {
   const r = host.getBoundingClientRect()
   if (!r.width || !r.height) return // hidden container -> nothing to report
   window.browserApi.setBounds({ x: r.x, y: r.y, width: r.width, height: r.height })
+  reportPanelBounds()
+}
+
+// Position the native ghostHR side-panel view over its docked region (zero
+// rect hides it when the panel is toggled closed).
+function reportPanelBounds() {
+  if (!sidepanelHost || !window.browserApi || !window.browserApi.setPanelBounds) return
+  if (!sidepanelHost.classList.contains('open')) {
+    window.browserApi.setPanelBounds({ x: 0, y: 0, width: 0, height: 0 })
+    return
+  }
+  const r = sidepanelHost.getBoundingClientRect()
+  if (!r.width || !r.height) return
+  window.browserApi.setPanelBounds({ x: r.x, y: r.y, width: r.width, height: r.height })
 }
 
 // Keep the view glued to its container across resizes and relayouts.
 const ro = new ResizeObserver(() => reportBounds())
-for (const host of [browserHost, agentBrowserHost]) {
+for (const host of [browserHost, agentBrowserHost, sidepanelHost]) {
   if (host) ro.observe(host)
 }
 window.addEventListener('resize', reportBounds)
+
+// ---------- ghostHR side panel toggle (pinned extension action) ----------
+const ghosthrAction = document.getElementById('ghosthr-action')
+if (ghosthrAction && sidepanelHost) {
+  ghosthrAction.addEventListener('click', () => {
+    const open = sidepanelHost.classList.toggle('open')
+    ghosthrAction.classList.toggle('active', open)
+    requestAnimationFrame(reportBounds)
+  })
+}
 
 // ---------- Browser ----------
 const urlInput = document.getElementById('url-input')
@@ -75,6 +100,16 @@ function navigate(url) {
 goBtn.addEventListener('click', () => navigate(urlInput.value))
 urlInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') navigate(urlInput.value) })
 
+// Native browser toolbar: back / forward / reload.
+const navBack = document.getElementById('nav-back')
+const navForward = document.getElementById('nav-forward')
+const navReload = document.getElementById('nav-reload')
+if (window.browserApi) {
+  if (navBack) navBack.addEventListener('click', () => window.browserApi.back())
+  if (navForward) navForward.addEventListener('click', () => window.browserApi.forward())
+  if (navReload) navReload.addEventListener('click', () => window.browserApi.reload())
+}
+
 if (window.browserApi) {
   window.browserApi.onNavigate(({ url } = {}) => {
     if (url) urlInput.value = url
@@ -90,11 +125,12 @@ async function captureScan() {
 }
 
 const captureBtn = document.getElementById('capture')
+const captureLabel = document.getElementById('capture-label')
 if (captureBtn) {
   captureBtn.addEventListener('click', async () => {
     try {
       captureBtn.disabled = true
-      captureBtn.textContent = 'Scanning…'
+      if (captureLabel) captureLabel.textContent = 'Scanning…'
       const res = await captureScan()
       if (res?.ok && res.scan) {
         appendBot(
@@ -108,7 +144,7 @@ if (captureBtn) {
       appendBot('⚠️ Scan error: ' + (e && e.message))
     } finally {
       captureBtn.disabled = false
-      captureBtn.textContent = 'Capture page'
+      if (captureLabel) captureLabel.textContent = 'Capture'
     }
   })
 }
@@ -249,8 +285,8 @@ function applyTheme(t) {
   try { localStorage.setItem(THEME_KEY, t) } catch { /* ignore */ }
 }
 function initTheme() {
-  let saved = 'light'
-  try { saved = localStorage.getItem(THEME_KEY) || 'light' } catch { /* ignore */ }
+  let saved = 'dark'
+  try { saved = localStorage.getItem(THEME_KEY) || 'dark' } catch { /* ignore */ }
   applyTheme(saved)
 }
 if (themeToggle) {

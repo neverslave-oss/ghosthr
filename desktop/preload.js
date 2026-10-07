@@ -30,8 +30,13 @@ contextBridge.exposeInMainWorld('ghosthr', {
 // there is no <webview> the renderer could reach with capturePage/executeJavaScript.
 contextBridge.exposeInMainWorld('browserApi', {
   navigate: (url) => ipcRenderer.invoke('browser:navigate', url),
+  back: () => ipcRenderer.invoke('browser:back'),
+  forward: () => ipcRenderer.invoke('browser:forward'),
+  reload: () => ipcRenderer.invoke('browser:reload'),
   // Tell main where the browser region sits (CSS pixels, viewport-relative).
   setBounds: (rect) => ipcRenderer.invoke('browser:set-bounds', rect),
+  // Position the ghostHR side-panel view (zero-sized rect hides it).
+  setPanelBounds: (rect) => ipcRenderer.invoke('panel:set-bounds', rect),
   capturePage: () => ipcRenderer.invoke('browser:capture-page'),
   scanImage: (dataUrl) => ipcRenderer.invoke('browser:scan-image', dataUrl),
   getAgentContext: () => ipcRenderer.invoke('browser:get-agent-context'),

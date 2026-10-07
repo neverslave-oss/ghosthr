@@ -63,6 +63,7 @@ class BrowserController {
    */
   constructor({ sendToRenderer } = {}) {
     this.view = null
+    this.panel = null // ghostHR side-panel WebContentsView (extension page)
     this.currentUrl = HOMEPAGE
     this._push = sendToRenderer || (() => {})
   }
@@ -80,6 +81,8 @@ class BrowserController {
       },
     })
     win.contentView.addChildView(this.view)
+    // Rounded corners so the native view matches the chrome's card framing.
+    try { this.view.setBorderRadius(14) } catch { /* older Electron */ }
 
     const wc = this.view.webContents
     wc.on('did-navigate', (_e, url) => {
@@ -100,6 +103,43 @@ class BrowserController {
     return this.view
   }
 
+  /**
+   * Create the ghostHR side-panel view — the extension's side_panel page
+   * (chrome-extension://<id>/src/popup/index.html) rendered natively in its
+   * own WebContentsView docked next to the browser, mirroring Chrome's side
+   * panel. Electron has no chrome.sidePanel implementation, so the desktop
+   * shell provides the docked surface itself; the page runs in a real
+   * extension-page context (full chrome.* APIs) in the shared default session.
+   */
+  createPanel(win, url) {
+    if (this.panel) return this.panel
+    this.panel = new WebContentsView({
+      webPreferences: {
+        session: session.defaultSession,
+        contextIsolation: true,
+        nodeIntegration: false,
+      },
+    })
+    win.contentView.addChildView(this.panel)
+    try { this.panel.setBorderRadius(14) } catch { /* older Electron */ }
+    // Hidden until the renderer reports real bounds for the panel region.
+    this.panel.setBounds({ x: 0, y: 0, width: 0, height: 0 })
+    this.panel.webContents.loadURL(url).catch((e) => {
+      console.warn('[ghostHR] side panel load failed:', e?.message ?? e)
+    })
+    return this.panel
+  }
+
+  /** Position the side panel. A zero-sized rect hides it (toggle closed). */
+  setPanelBounds(r) {
+    if (!this.panel) return
+    const x = Math.max(0, Math.round(Number(r?.x) || 0))
+    const y = Math.max(0, Math.round(Number(r?.y) || 0))
+    const w = Math.max(0, Math.round(Number(r?.width) || 0))
+    const h = Math.max(0, Math.round(Number(r?.height) || 0))
+    this.panel.setBounds({ x, y, width: w, height: h })
+  }
+
   /** Position/size the browser view within the window's content area. */
   setBounds(r) {
     if (!this.view) return
@@ -113,6 +153,29 @@ class BrowserController {
       return
     }
     this.view.setBounds({ x, y, width: w, height: h })
+  }
+
+  goBack() {
+    const wc = this.view?.webContents
+    if (!wc) return { ok: false }
+    const nav = wc.navigationHistory
+    if (nav?.canGoBack()) { nav.goBack(); return { ok: true } }
+    return { ok: false }
+  }
+
+  goForward() {
+    const wc = this.view?.webContents
+    if (!wc) return { ok: false }
+    const nav = wc.navigationHistory
+    if (nav?.canGoForward()) { nav.goForward(); return { ok: true } }
+    return { ok: false }
+  }
+
+  reload() {
+    const wc = this.view?.webContents
+    if (!wc) return { ok: false }
+    wc.reload()
+    return { ok: true }
   }
 
   async navigate(input) {
@@ -170,12 +233,23 @@ class BrowserController {
     ipcMain.handle('browser:capture-page', () => this.capturePage())
     ipcMain.handle('browser:scan-image', (_e, dataUrl) => this.scanImage(dataUrl))
     ipcMain.handle('browser:get-agent-context', () => this.getAgentContext())
+    ipcMain.handle('browser:back', () => this.goBack())
+    ipcMain.handle('browser:forward', () => this.goForward())
+    ipcMain.handle('browser:reload', () => this.reload())
+    ipcMain.handle('panel:set-bounds', (_e, rect) => {
+      this.setPanelBounds(rect)
+      return { ok: true }
+    })
   }
 
   destroy() {
     if (this.view) {
       try { this.view.webContents.close() } catch { /* already closed */ }
       this.view = null
+    }
+    if (this.panel) {
+      try { this.panel.webContents.close() } catch { /* already closed */ }
+      this.panel = null
     }
   }
 }

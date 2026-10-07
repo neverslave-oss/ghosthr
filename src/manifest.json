@@ -23,6 +23,12 @@
   "side_panel": {
     "default_path": "src/popup/index.html"
   },
+  "web_accessible_resources": [
+    {
+      "resources": ["src/popup/index.html"],
+      "matches": ["<all_urls>"]
+    }
+  ],
   "background": {
     "service_worker": "src/background.ts",
     "type": "module"

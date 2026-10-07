@@ -29,6 +29,17 @@ const { webSearch } = require('./agent/webSearch')
 
 const DEV = !app.isPackaged
 
+// A second instance corrupts the shared session (cache locks, service-worker
+// registration failures, EADDRINUSE on the agent bridge). The tray keeps the
+// app resident after the window closes, so double launches are common —
+// enforce a single instance and surface the existing window instead.
+const hasInstanceLock = app.requestSingleInstanceLock()
+if (!hasInstanceLock) {
+  app.quit()
+} else {
+  app.on('second-instance', () => showMainWindow())
+}
+
 // Native WebContentsView browser controller (replaces the renderer <webview>).
 const { BrowserController } = require('./browser')
 const EXT_DIR = DEV
@@ -57,8 +68,10 @@ async function loadGhostHrExtension() {
     return null
   }
   try {
-    // Extension must load into the SAME session the webview uses.
-    const ext = await session.defaultSession.loadExtension(dir, { allowFileAccess: true })
+    // Extension must load into the SAME session the browser view uses.
+    // session.loadExtension is deprecated — use session.extensions (Electron ≥ 35).
+    const extensions = session.defaultSession.extensions ?? session.defaultSession
+    const ext = await extensions.loadExtension(dir, { allowFileAccess: true })
     console.log('[ghostHR] Extension loaded:', ext.id)
     loadedExtId = ext.id
     return ext
@@ -115,6 +128,13 @@ function createWindow() {
   })
   browserCtl.create(win)
   browserCtl.registerIpc()
+
+  // ghostHR side panel — the extension's side_panel page rendered natively in
+  // a docked WebContentsView (Electron has no chrome.sidePanel; the shell
+  // provides the docked surface, same seamless UX as the standalone add-on).
+  if (loadedExtId) {
+    browserCtl.createPanel(win, `chrome-extension://${loadedExtId}/src/popup/index.html`)
+  }
 
   // --- Desktop-shell debug capture (GHOSTHR_E2E=1 only; never in prod) ---
   // Runs the real window on a live display and writes a composited capture + a
@@ -358,7 +378,12 @@ ipcMain.handle('ghosthr:agent-turn', async (_evt, payload) => {
 // ---------------------------------------------------------------------------
 function startAgentBridge() {
   const server = http.createServer(async (req, res) => {
-    res.setHeader('Access-Control-Allow-Origin', 'chrome-extension://*')
+    // 'chrome-extension://*' is not a valid ACAO value — echo the extension's
+    // actual origin or the panel/Agent-tab fetch fails the CORS check.
+    const origin = String(req.headers.origin || '')
+    if (/^chrome-extension:\/\//.test(origin)) {
+      res.setHeader('Access-Control-Allow-Origin', origin)
+    }
     res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS')
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
     if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return }
@@ -366,6 +391,15 @@ function startAgentBridge() {
     if (req.method === 'GET' && req.url === '/agent/health') {
       res.writeHead(200, { 'Content-Type': 'application/json' })
       res.end(JSON.stringify({ ok: true }))
+      return
+    }
+
+    // Shell-side page capture for the extension panel: Electron has no
+    // chrome.tabs.captureVisibleTab, so the panel's Scan falls back to this.
+    if (req.method === 'GET' && req.url === '/capture') {
+      const cap = browserCtl ? await browserCtl.capturePage() : { ok: false, error: 'no browser view' }
+      res.writeHead(cap.ok ? 200 : 500, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ ...cap, url: browserCtl ? browserCtl.currentUrl : '' }))
       return
     }
 
@@ -398,6 +432,7 @@ function startAgentBridge() {
 }
 
 app.whenReady().then(async () => {
+  if (!hasInstanceLock) return // quitting — another instance owns the session
   await loadGhostHrExtension()
   createWindow()
   createTray()
