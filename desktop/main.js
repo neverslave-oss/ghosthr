@@ -79,6 +79,12 @@ function createWindow() {
 
   // UI view — full-window WebContentsView that renders the DOM shell
   // (header/urlbar/tabs/chat/theme toggle). Browser chrome stays here.
+  // NOTE: a WebContentsView added to a BaseWindow contentView does NOT size
+  // itself — it starts at 0x0 unless setBounds is called (Electron docs,
+  // BaseWindow/View). The embedded browser view below explicitly sets its own
+  // full-window bounds on create, which would otherwise cover this chrome and
+  // hide the header/tabs/urlbar. So the UI chrome MUST be given explicit
+  // full-window bounds up front (and kept in sync on resize) to stay visible.
   uiView = new WebContentsView({
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -87,7 +93,16 @@ function createWindow() {
     },
   })
   win.contentView.addChildView(uiView)
+  const [iw, ih] = win.getSize()
+  if (iw && ih) uiView.setBounds({ x: 0, y: 0, width: iw, height: ih })
   uiView.webContents.loadFile(path.join(__dirname, 'renderer', 'index.html'))
+  // Keep the chrome glued to the window as it resizes (BaseWindow has no auto
+  // layout for child views).
+  win.on('resize', () => {
+    if (!win || !uiView) return
+    const [rw, rh] = win.getContentSize()
+    if (rw && rh) uiView.setBounds({ x: 0, y: 0, width: rw, height: rh })
+  })
 
   // Embedded browser view — a native WebContentsView using the DEFAULT session
   // (shared with the loaded ghostHR extension) so its content scripts run on
@@ -100,6 +115,60 @@ function createWindow() {
   })
   browserCtl.create(win)
   browserCtl.registerIpc()
+
+  // --- Desktop-shell debug capture (GHOSTHR_E2E=1 only; never in prod) ---
+  // Runs the real window on a live display and writes a composited capture + a
+  // DOM dump so we can SEE whether the chrome (uiView) is visible or covered by
+  // the full-window browser view.
+  if (process.env.GHOSTHR_E2E === '1') {
+    const fs = require('node:fs')
+    const outDir = path.join(process.cwd(), 'test-results')
+    fs.mkdirSync(outDir, { recursive: true })
+    setTimeout(async () => {
+      try {
+        const dbg = {}
+        try {
+          dbg.uiBounds = await uiView.webContents.executeJavaScript(
+            `({ w: document.body.clientWidth, h: document.body.clientHeight, brand: (!!document.querySelector('.brand')) })`,
+          )
+        } catch (e) { dbg.uiBounds = 'ui error: ' + (e && e.message) }
+        try { dbg.winSize = win.getSize() } catch (e) { dbg.winSize = String(e && e.message) }
+        try {
+          const img = await win.webContents.capturePage()
+          if (img && !img.isEmpty()) {
+            const p = path.join(outDir, 'desktop-composited.png')
+            fs.writeFileSync(p, img.toPNG())
+            dbg.compositedShot = p
+          } else dbg.compositedShot = 'EMPTY'
+        } catch (e) { dbg.compositedShot = 'cap error: ' + (e && e.message) }
+        try {
+          const uiImg = await browserCtl.view.webContents.capturePage()
+          if (uiImg && !uiImg.isEmpty()) {
+            const p = path.join(outDir, 'desktop-browserview.png')
+            fs.writeFileSync(p, uiImg.toPNG())
+            dbg.browserShot = p
+          }
+        } catch (e) { dbg.browserShot = 'browser cap error: ' + (e && e.message) }
+        try {
+          // The chrome (uiView) itself — does the ghostHR header render?
+          const chromeImg = await uiView.webContents.capturePage()
+          if (chromeImg && !chromeImg.isEmpty()) {
+            const p = path.join(outDir, 'desktop-chrome.png')
+            fs.writeFileSync(p, chromeImg.toPNG())
+            dbg.chromeShot = p
+          } else dbg.chromeShot = 'EMPTY'
+        } catch (e) { dbg.chromeShot = 'chrome cap error: ' + (e && e.message) }
+        // Browser view bounds vs chrome bounds — is the browser covering the header?
+        try {
+          dbg.browserBounds = browserCtl.view.getBounds()
+        } catch (e) { dbg.browserBounds = String(e && e.message) }
+        try { dbg.chromeBounds = uiView.getBounds() } catch (e) { dbg.chromeBounds = String(e && e.message) }
+        console.log('[ghostHR-DEBUG]', JSON.stringify(dbg))
+      } catch (e) {
+        console.log('[ghostHR-DEBUG] error', String(e && e.message))
+      }
+    }, 2500)
+  }
 
   // Close (X) hides to the system tray instead of quitting, so the app stays
   // resident and one tray click brings it back. True quit only happens via the

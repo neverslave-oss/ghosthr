@@ -6,7 +6,9 @@
   "type": "commonjs",
   "scripts": {
     "start": "electron .",
-    "dist": "electron-builder"
+    "dist": "electron-builder",
+    "test": "vitest run",
+    "test:e2e": "vitest run"
   },
   "devDependencies": {
     "electron": "^44.5.1",
