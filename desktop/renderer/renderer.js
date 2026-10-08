@@ -276,6 +276,159 @@ function send() {
 agentSend.addEventListener('click', send)
 agentInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') send() })
 
+// ---------- Bookmarks sidebar ----------
+// Curated boards where the scanner is known to work well (tier-1 DOM detection
+// or vision tier), shown as non-editable "Supported". User bookmarks persist
+// in localStorage and are fully CRUD-managed.
+const SUPPORTED_BOOKMARKS = [
+  { name: 'Workable Jobs', url: 'https://jobs.workable.com/' },
+  { name: 'LinkedIn Jobs', url: 'https://www.linkedin.com/jobs/' },
+  { name: 'Indeed', url: 'https://www.indeed.com/' },
+  { name: 'Wellfound', url: 'https://wellfound.com/jobs' },
+  { name: 'We Work Remotely', url: 'https://weworkremotely.com/' },
+  { name: 'RemoteOK', url: 'https://remoteok.com/' },
+]
+const BM_KEY = 'ghosthr.bookmarks'
+const bmSidebar = document.getElementById('bookmarks-sidebar')
+const bmList = document.getElementById('bm-list')
+const bmForm = document.getElementById('bm-form')
+const bmName = document.getElementById('bm-name')
+const bmUrl = document.getElementById('bm-url')
+let bmEditId = null // id being edited, null = adding
+
+function loadBookmarks() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(BM_KEY) || '[]')
+    return Array.isArray(raw) ? raw.filter((b) => b && b.id && b.url) : []
+  } catch { return [] }
+}
+function saveBookmarks(list) {
+  try { localStorage.setItem(BM_KEY, JSON.stringify(list)) } catch { /* full */ }
+}
+
+function bmInitial(name, url) {
+  const n = String(name || '').trim()
+  if (n) return n[0].toUpperCase()
+  try { return new URL(url).hostname.replace(/^www\./, '')[0].toUpperCase() } catch { return '•' }
+}
+
+function bmItem(bm, { editable } = { editable: false }) {
+  const btn = document.createElement('button')
+  btn.type = 'button'
+  btn.className = 'bm-item'
+  btn.title = bm.url
+  const dot = document.createElement('span')
+  dot.className = 'bm-dot'
+  dot.textContent = bmInitial(bm.name, bm.url)
+  const name = document.createElement('span')
+  name.className = 'bm-name'
+  name.textContent = bm.name || bm.url
+  btn.appendChild(dot)
+  btn.appendChild(name)
+  if (editable) {
+    const ops = document.createElement('span')
+    ops.className = 'bm-ops'
+    const edit = document.createElement('button')
+    edit.type = 'button'
+    edit.textContent = '✎'
+    edit.title = 'Edit bookmark'
+    edit.addEventListener('click', (e) => {
+      e.stopPropagation()
+      bmEditId = bm.id
+      bmName.value = bm.name || ''
+      bmUrl.value = bm.url
+      bmForm.classList.add('open')
+      bmName.focus()
+    })
+    const del = document.createElement('button')
+    del.type = 'button'
+    del.textContent = '✕'
+    del.title = 'Delete bookmark'
+    del.addEventListener('click', (e) => {
+      e.stopPropagation()
+      saveBookmarks(loadBookmarks().filter((b) => b.id !== bm.id))
+      renderBookmarks()
+    })
+    ops.appendChild(edit)
+    ops.appendChild(del)
+    btn.appendChild(ops)
+  }
+  btn.addEventListener('click', () => {
+    switchTab('browser')
+    navigate(bm.url)
+  })
+  return btn
+}
+
+function renderBookmarks() {
+  if (!bmList) return
+  bmList.textContent = ''
+  const supported = document.createElement('div')
+  supported.className = 'bm-group'
+  supported.textContent = 'Supported'
+  bmList.appendChild(supported)
+  for (const bm of SUPPORTED_BOOKMARKS) bmList.appendChild(bmItem(bm))
+  const mine = loadBookmarks()
+  const group = document.createElement('div')
+  group.className = 'bm-group'
+  group.textContent = 'My bookmarks'
+  bmList.appendChild(group)
+  if (!mine.length) {
+    const empty = document.createElement('div')
+    empty.className = 'bm-group empty'
+    empty.style.textTransform = 'none'
+    empty.textContent = 'None yet — hit + to add one.'
+    bmList.appendChild(empty)
+  }
+  for (const bm of mine) bmList.appendChild(bmItem(bm, { editable: true }))
+}
+
+document.getElementById('bm-add')?.addEventListener('click', () => {
+  bmEditId = null
+  bmName.value = ''
+  bmUrl.value = ''
+  bmForm.classList.toggle('open')
+  if (bmForm.classList.contains('open')) bmName.focus()
+})
+document.getElementById('bm-cancel')?.addEventListener('click', () => {
+  bmForm.classList.remove('open')
+  bmEditId = null
+})
+bmForm?.addEventListener('submit', (e) => {
+  e.preventDefault()
+  let url = String(bmUrl.value || '').trim()
+  if (!url) return
+  if (!/^https?:\/\//i.test(url)) url = 'https://' + url
+  try { new URL(url) } catch { bmUrl.focus(); return }
+  const list = loadBookmarks()
+  if (bmEditId) {
+    const bm = list.find((b) => b.id === bmEditId)
+    if (bm) { bm.name = bmName.value.trim(); bm.url = url }
+  } else {
+    list.push({ id: 'bm_' + Date.now().toString(36), name: bmName.value.trim(), url })
+  }
+  saveBookmarks(list)
+  bmForm.classList.remove('open')
+  bmEditId = null
+  renderBookmarks()
+})
+
+const bookmarksToggle = document.getElementById('bookmarks-toggle')
+if (bookmarksToggle && bmSidebar) {
+  bookmarksToggle.addEventListener('click', () => {
+    bmSidebar.classList.toggle('open')
+    requestAnimationFrame(reportBounds)
+  })
+}
+renderBookmarks()
+
+// Agency credit — open in the embedded browser, not the chrome page itself.
+document.getElementById('dev-credit')?.addEventListener('click', (e) => {
+  e.preventDefault()
+  switchTab('browser')
+  navigate('https://neverslave.com')
+})
+
 // ---------- Theme toggle ----------
 const themeToggle = document.getElementById('theme-toggle')
 const THEME_KEY = 'ghosthr.theme'

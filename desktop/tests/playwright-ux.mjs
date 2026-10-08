@@ -129,6 +129,81 @@ try {
     await chromePage.click('.tabs button[data-tab="agent"]')
     await chromePage.waitForTimeout(400)
     await chromePage.screenshot({ path: path.join(OUT, 'ux-agent-tab.png') })
+    await chromePage.click('.tabs button[data-tab="browser"]')
+
+    // Bookmarks sidebar: supported entries + user CRUD.
+    const sbOpen = await chromePage.locator('#bookmarks-sidebar.open').count()
+    if (sbOpen === 1) pass('bookmarks sidebar open by default')
+    else fail('bookmarks sidebar not visible')
+    const supportedCount = await chromePage.locator('#bm-list .bm-item').count()
+    if (supportedCount >= 6) pass(`supported bookmarks listed (${supportedCount})`)
+    else fail(`expected >= 6 supported bookmarks, got ${supportedCount}`)
+
+    await chromePage.click('#bm-add')
+    await chromePage.fill('#bm-name', 'HN Jobs')
+    await chromePage.fill('#bm-url', 'news.ycombinator.com/jobs')
+    await chromePage.click('#bm-save')
+    await chromePage.waitForTimeout(200)
+    const added = await chromePage.locator('.bm-item', { hasText: 'HN Jobs' }).count()
+    if (added === 1) pass('bookmark CRUD: add works (url normalized)')
+    else fail('bookmark add failed')
+    const persisted = await chromePage.evaluate(() => localStorage.getItem('ghosthr.bookmarks') || '')
+    if (persisted.includes('news.ycombinator.com')) pass('bookmark persisted to localStorage')
+    else fail('bookmark not persisted')
+
+    // Clicking a bookmark navigates the embedded browser.
+    await chromePage.locator('.bm-item', { hasText: 'HN Jobs' }).click()
+    await chromePage.waitForTimeout(2500)
+    const urlVal = await chromePage.inputValue('#url-input')
+    if (urlVal.includes('ycombinator.com')) pass('bookmark click navigates the browser: ' + urlVal)
+    else fail('bookmark click did not navigate (urlbar: ' + urlVal + ')')
+
+    await chromePage.locator('.bm-item', { hasText: 'HN Jobs' }).hover()
+    await chromePage.locator('.bm-item', { hasText: 'HN Jobs' }).locator('.bm-ops button[title="Delete bookmark"]').click()
+    await chromePage.waitForTimeout(200)
+    const afterDel = await chromePage.locator('.bm-item', { hasText: 'HN Jobs' }).count()
+    if (afterDel === 0) pass('bookmark CRUD: delete works')
+    else fail('bookmark delete failed')
+
+    // Agency credit: visible in the sidebar and opens in the embedded browser.
+    const credit = await chromePage.locator('#dev-credit').count()
+    if (credit === 1) pass('developed-by credit present in sidebar')
+    else fail('developed-by credit missing')
+
+    // Full-page capture on a REAL job advert (the elevenlabs page that used to
+    // scan partially): /capture must return a PNG taller than the viewport and
+    // the DOM text must contain the whole advert for the pageText scan path.
+    const ADVERT = 'https://elevenlabs.io/careers/ada7cd2c-8b9f-4f19-a88b-7c2ca1be1fde/full-stack-engineer-front-end-leaning'
+    // Navigate over IPC: filling the urlbar can race with onNavigate updates.
+    await chromePage.evaluate((u) => window.browserApi.navigate(u), ADVERT)
+    for (let i = 0; i < 40; i++) {
+      await chromePage.waitForTimeout(500)
+      if (sitePage && sitePage.url().includes('elevenlabs.io')) break
+    }
+    await chromePage.waitForTimeout(4000)
+    try {
+      const res = await fetch('http://127.0.0.1:18977/capture')
+      const cap = await res.json()
+      if (cap?.ok && cap.dataUrl?.startsWith('data:image/png;base64,')) {
+        const png = Buffer.from(cap.dataUrl.slice('data:image/png;base64,'.length), 'base64')
+        const height = png.readUInt32BE(20) // IHDR height
+        if (height > 1000) pass(`job-advert capture includes below-the-fold content (height ${height}px > viewport 650px)`)
+        else fail(`advert capture height ${height}px — looks viewport-only`)
+      } else fail('capture bridge returned no PNG: ' + JSON.stringify(cap)?.slice(0, 120))
+    } catch (e) {
+      fail('capture bridge unreachable: ' + e.message)
+    }
+    if (sitePage) {
+      try {
+        const txt = await sitePage.evaluate(() => document.body.innerText)
+        if (/full[\s-]*stack engineer/i.test(txt)) pass('advert DOM text contains the job title')
+        else fail('advert DOM text missing job title (page may not have loaded)')
+        if (txt.length > 4000) pass(`advert DOM text is complete for the pageText scan path (${txt.length} chars)`)
+        else fail(`advert DOM text suspiciously short (${txt.length} chars)`)
+      } catch (e) {
+        fail('could not read advert DOM text: ' + e.message)
+      }
+    }
   }
   if (sitePage) await sitePage.screenshot({ path: path.join(OUT, 'ux-browser-page.png') })
 

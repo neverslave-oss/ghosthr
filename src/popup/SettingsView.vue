@@ -25,8 +25,10 @@ const s = props.store
           <label class="field-label">{{ PROVIDER_CATALOG[pid].keyLabel }}</label>
           <input type="password" v-model="s.provider(pid)!.apiKey" :placeholder="PROVIDER_CATALOG[pid].keyLabel" />
           <label class="field-label">Model {{ s.modelLoading ? '(loading…)' : '' }}</label>
-          <select v-model="s.provider(pid)!.model">
-            <option v-for="m in (s.modelChoices[pid]?.length ? s.modelChoices[pid] : s.staticModels(pid))"
+          <!-- modelOptions always includes the persisted model; @change saves
+               immediately so the choice survives restarts without "Save settings". -->
+          <select v-model="s.provider(pid)!.model" @change="s.saveSettings()">
+            <option v-for="m in s.modelOptions(pid)"
               :key="m.id" :value="m.id">
               {{ m.id }}{{ m.suggested ? ' ★ recommended' : '' }}
             </option>
@@ -61,5 +63,17 @@ const s = props.store
     </section>
 
     <button class="primary" @click="s.saveSettings">Save settings</button>
+
+    <p class="dev-credit">
+      Developed by <a href="https://neverslave.com" target="_blank" rel="noopener"><b>Fab</b> at neverslave.com</a>
+    </p>
   </main>
 </template>
+
+<style scoped>
+.dev-credit {
+  margin-top: 14px; text-align: center; font-size: 11px; color: var(--ink-faint);
+}
+.dev-credit a { color: var(--ink-dim); text-decoration: none; }
+.dev-credit a:hover { color: var(--accent-1); }
+</style>

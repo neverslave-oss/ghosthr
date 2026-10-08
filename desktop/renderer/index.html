@@ -213,6 +213,73 @@
       }
       .agent .composer button:hover { filter: brightness(1.08); }
       .empty { color: var(--ink-dim); }
+
+      /* ---------- Bookmarks sidebar ---------- */
+      #bookmarks-sidebar {
+        flex: 0 0 232px; display: none; flex-direction: column; min-height: 0;
+        margin: 12px 0 12px 12px; border-radius: var(--radius);
+        background: var(--card); border: 1px solid var(--card-border);
+        overflow: hidden;
+      }
+      #bookmarks-sidebar.open { display: flex; }
+      .bm-head {
+        display: flex; align-items: center; justify-content: space-between;
+        padding: 10px 12px; border-bottom: 1px solid var(--line);
+        font-size: 12px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase;
+        color: var(--ink-dim);
+      }
+      .bm-head button {
+        border: none; background: var(--accent-grad); color: #fff; cursor: pointer;
+        width: 22px; height: 22px; border-radius: 7px; font-size: 14px; line-height: 1;
+      }
+      .bm-list { flex: 1; overflow-y: auto; padding: 6px; }
+      .bm-list::-webkit-scrollbar { width: 8px; }
+      .bm-list::-webkit-scrollbar-thumb { background: rgba(148,163,184,.25); border-radius: 999px; }
+      .bm-group {
+        padding: 8px 8px 4px; font-size: 10.5px; font-weight: 800; letter-spacing: .08em;
+        text-transform: uppercase; color: var(--ink-faint);
+      }
+      .bm-item {
+        display: flex; align-items: center; gap: 8px; width: 100%;
+        padding: 7px 8px; border: none; border-radius: 9px; cursor: pointer;
+        background: transparent; color: var(--ink); font-size: 12.5px; text-align: left;
+      }
+      .bm-item:hover { background: var(--surface); }
+      .bm-item .bm-dot {
+        flex: 0 0 20px; width: 20px; height: 20px; border-radius: 6px;
+        display: grid; place-items: center; color: #fff; font-size: 10px; font-weight: 800;
+        background: var(--accent-grad);
+      }
+      .bm-item .bm-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .bm-item .bm-ops { display: none; gap: 2px; }
+      .bm-item:hover .bm-ops { display: flex; }
+      .bm-ops button {
+        border: none; background: transparent; color: var(--ink-dim); cursor: pointer;
+        width: 20px; height: 20px; border-radius: 6px; font-size: 11px; line-height: 1;
+      }
+      .bm-ops button:hover { background: var(--surface-soft); color: var(--ink); }
+      .bm-form { padding: 10px; border-top: 1px solid var(--line); display: none; flex-direction: column; gap: 6px; }
+      .bm-form.open { display: flex; }
+      .bm-form input {
+        height: 30px; padding: 0 10px; font-size: 12.5px; color: var(--ink);
+        background: var(--input-bg); border: 1px solid var(--line); border-radius: 8px; outline: none;
+      }
+      .bm-form input:focus { border-color: var(--accent-1); }
+      .bm-form .bm-form-ops { display: flex; gap: 6px; }
+      .bm-form .bm-form-ops button {
+        flex: 1; height: 28px; border: none; border-radius: 8px; cursor: pointer;
+        font-size: 12px; font-weight: 700;
+      }
+      .bm-form .bm-save { background: var(--accent-grad); color: #fff; }
+      .bm-form .bm-cancel { background: var(--surface-soft); color: var(--ink-dim); border: 1px solid var(--line); }
+      .dev-credit {
+        display: block; padding: 10px 12px; border-top: 1px solid var(--line);
+        font-size: 11px; color: var(--ink-faint); text-align: center;
+        text-decoration: none; cursor: pointer;
+      }
+      .dev-credit b { color: var(--ink-dim); }
+      .dev-credit:hover { color: var(--accent-1); }
+      .dev-credit:hover b { color: var(--accent-1); }
     </style>
   </head>
   <body>
@@ -221,6 +288,9 @@
         <div class="mark">HR</div>
         <div class="title">ghost<span>HR</span></div>
       </div>
+      <button class="theme-toggle" id="bookmarks-toggle" title="Toggle bookmarks sidebar">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
+      </button>
       <nav class="tabs">
         <button data-tab="browser" class="active">Browser</button>
         <button data-tab="agent">Agent</button>
@@ -254,6 +324,22 @@
     </header>
 
     <main>
+      <aside id="bookmarks-sidebar" class="open">
+        <div class="bm-head">
+          <span>Bookmarks</span>
+          <button id="bm-add" title="Add bookmark">+</button>
+        </div>
+        <div class="bm-list" id="bm-list"></div>
+        <form class="bm-form" id="bm-form">
+          <input id="bm-name" placeholder="Name" maxlength="40" />
+          <input id="bm-url" placeholder="https://…" />
+          <div class="bm-form-ops">
+            <button type="submit" class="bm-save" id="bm-save">Save</button>
+            <button type="button" class="bm-cancel" id="bm-cancel">Cancel</button>
+          </div>
+        </form>
+        <a class="dev-credit" id="dev-credit" href="https://neverslave.com" title="neverslave.com — web agency">Developed by <b>Fab</b> at neverslave.com</a>
+      </aside>
       <div class="tab-area">
         <section id="tab-agent" class="panel agent">
           <div class="agent-browser" id="agent-browser">
