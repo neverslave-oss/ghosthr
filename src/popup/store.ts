@@ -497,6 +497,21 @@ export function usePopupStore() {
     return (PROVIDER_CATALOG[pid]?.models ?? []).map((id) => ({ id, suggested: false }))
   }
 
+  /**
+   * Options for a provider's model select. Merges the fetched list (or the
+   * static catalog fallback) with the PERSISTED selection: a saved model that
+   * isn't in either list is prepended, so the select shows the active model
+   * right after restart instead of rendering blank until "Refresh models".
+   */
+  function modelOptions(pid: ProviderId): ModelChoice[] {
+    const list = modelChoices.value[pid]?.length ? modelChoices.value[pid] : staticModels(pid)
+    const current = provider(pid)?.model
+    if (current && !list.some((c) => c.id === current)) {
+      return [{ id: current, suggested: false }, ...list]
+    }
+    return list
+  }
+
   async function loadModelChoices(pid: ProviderId) {
     const p = provider(pid)
     if (!p || !p.baseUrl) return
@@ -509,12 +524,14 @@ export function usePopupStore() {
     try {
       const choices = await getProviderModels({ provider: pid, baseUrl: p.baseUrl, apiKey: p.apiKey || undefined })
       modelChoices.value[pid] = choices
-      // If nothing selected yet (or old default), preselect first suggested vision model.
-      const current = p.model
-      const suggested = choices.find((c) => c.suggested)
-      if (!current || !choices.some((c) => c.id === current)) {
+      // Preselect a suggested model ONLY when nothing is chosen yet. A saved
+      // selection missing from the fetched list is kept (modelOptions keeps it
+      // visible) — refreshing must never silently override the user's model.
+      if (!p.model) {
+        const suggested = choices.find((c) => c.suggested)
         if (suggested) p.model = suggested.id
         else if (choices[0]) p.model = choices[0].id
+        if (p.model) await saveSettings()
       }
     } catch {
       // fall back to catalog defaults (getProviderModels already does)
@@ -584,7 +601,7 @@ export function usePopupStore() {
     cvList, activeCvId, activeCvProfile, loadCvList, selectCv,
     modelChoices, modelLoading, recClass, cvShortName,
     agentMessages, agentBusy, agentMode,
-    provider, staticModels, hasUsable, cycleTheme,
+    provider, staticModels, modelOptions, hasUsable, cycleTheme,
     refreshSettings, scanPage, onCvFile, runVerdict, autofill, trackApplication,
     loadApplications, restoreScan, saveSettings, loadModelChoices, loadAllModelChoices,
     setupNeeded, completeSetup, init, sendAgent,
