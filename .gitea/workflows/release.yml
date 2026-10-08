@@ -1,0 +1,102 @@
+name: Release
+
+# Gitea Actions: builds the extension zip and the Linux AppImage on the default
+# Linux runner, then attaches artifacts to the Gitea release for the pushed tag.
+# Windows (NSIS) and macOS (DMG) builds require self-hosted runners with the
+# matching OS — see the commented jobs at the bottom to enable them.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build-and-release:
+    name: Extension + Linux desktop
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Ensure zip is available
+        run: command -v zip >/dev/null || (apt-get update && apt-get install -y zip)
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run unit tests
+        run: npm test
+
+      - name: Build extension
+        run: npm run build
+
+      - name: Package extension zip
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          cd dist && zip -r "../ghosthr-extension-v${VERSION}.zip" .
+
+      - name: Install desktop dependencies
+        working-directory: desktop
+        run: npm ci
+
+      - name: Package Linux AppImage
+        working-directory: desktop
+        run: npx electron-builder --linux AppImage --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+
+      - name: Attach artifacts to Gitea release
+        uses: https://gitea.com/actions/release-action@main
+        with:
+          files: |-
+            ghosthr-extension-v*.zip
+            desktop/release/*.AppImage
+          # Built-in token works on recent Gitea; use a PAT secret (e.g.
+          # secrets.RELEASE_TOKEN) if release creation is rejected.
+          api_key: ${{ github.token }}
+
+  # To build Windows/macOS artifacts on Gitea, register self-hosted runners with
+  # the labels below, then uncomment:
+  #
+  # desktop-windows:
+  #   runs-on: windows
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - uses: actions/setup-node@v4
+  #       with:
+  #         node-version: 24
+  #     - run: npm ci
+  #     - run: npm run build
+  #     - run: npm ci
+  #       working-directory: desktop
+  #     - run: npx electron-builder --win nsis --publish never
+  #       working-directory: desktop
+  #     - uses: https://gitea.com/actions/release-action@main
+  #       with:
+  #         files: |-
+  #           desktop/release/*.exe
+  #           desktop/release/*.exe.blockmap
+  #         api_key: ${{ github.token }}
+  #
+  # desktop-macos:
+  #   runs-on: macos
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - uses: actions/setup-node@v4
+  #       with:
+  #         node-version: 24
+  #     - run: npm ci
+  #     - run: npm run build
+  #     - run: npm ci
+  #       working-directory: desktop
+  #     - run: npx electron-builder --mac dmg --publish never
+  #       working-directory: desktop
+  #       env:
+  #         CSC_IDENTITY_AUTO_DISCOVERY: "false"
+  #     - uses: https://gitea.com/actions/release-action@main
+  #       with:
+  #         files: desktop/release/*.dmg
+  #         api_key: ${{ github.token }}
