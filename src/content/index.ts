@@ -29,6 +29,10 @@ export function deriveApplyUrl(url: string): string | null {
 
 function collectFields(): AthFormField[] {
   const fields: AthFormField[] = []
+  // Cookie-consent / captcha widgets render real inputs that are NOT part of
+  // any application form — counting them lets a consent dialog masquerade as
+  // a detected form (elevenlabs: 4 Cookiebot checkboxes).
+  const JUNK = /cookiebot|cookie|consent|gdpr|captcha|newsletter/i
   const selectors = [
     'textarea',
     'input[type="text"]',
@@ -54,6 +58,7 @@ function collectFields(): AthFormField[] {
       const label = html.closest('label')?.textContent?.trim() ?? null
       const name = html.getAttribute('name') || html.getAttribute('id') || null
       const placeholder = html.getAttribute('placeholder') || null
+      if (JUNK.test([name, label, placeholder].filter(Boolean).join(' '))) return
       const required = html.hasAttribute('required') || html.getAttribute('aria-required') === 'true'
       fields.push({ kind, name, label, placeholder, required })
     })

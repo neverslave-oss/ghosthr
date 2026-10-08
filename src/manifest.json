@@ -3,7 +3,7 @@
   "name": "ghostHR",
   "version": "0.1.0",
   "description": "Decide whether a job is worth applying to, get hold-back prep, and track applications — standalone-first.",
-  "permissions": ["storage", "activeTab", "scripting", "tabs", "sidePanel"],
+  "permissions": ["storage", "activeTab", "scripting", "tabs", "sidePanel", "debugger"],
   "host_permissions": ["<all_urls>"],
   "icons": {
     "16": "src/icons/icon16.png",

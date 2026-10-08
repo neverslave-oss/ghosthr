@@ -49,6 +49,15 @@ describe('extractJobDescription', () => {
     expect(desc).toContain('senior engineer')
     expect(desc).not.toContain('First name')
   })
+
+  it('keeps ALL pre-form paragraphs (multi-section adverts must not collapse to one)', () => {
+    const body = 'About the company, a long intro.\nThe role involves building systems.\nRequirements: TypeScript and Vue.\nBenefits: remote work.\nFirst name\nLast name'
+    const desc = extractJobDescription(body, body.indexOf('First name'))
+    expect(desc).toContain('About the company')
+    expect(desc).toContain('Requirements')
+    expect(desc).toContain('Benefits')
+    expect(desc).not.toContain('First name')
+  })
 })
 
 describe('mapFieldName', () => {

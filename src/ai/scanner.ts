@@ -53,6 +53,8 @@ If you cannot identify a job advert on the page, return an empty object.`
 export interface ScanProviderInput {
   settings: Settings
   screenshotDataUrl: string
+  /** Full DOM text — covers inner-scroll pages the screenshot can't show. */
+  pageText?: string
   signal?: AbortSignal
 }
 
@@ -80,6 +82,14 @@ export async function scanPage(input: ScanProviderInput): Promise<PageScan> {
         role: 'user',
         content: [
           { type: 'text', text: 'Scan this job application page and return the structured JSON.' },
+          ...(input.pageText
+            ? [{
+                type: 'text' as const,
+                text:
+                  'Full page text extracted from the DOM (authoritative for the job description — the screenshot may show only part of a scrollable page):\n' +
+                  input.pageText.slice(0, 20000),
+              }]
+            : []),
           { type: 'image_url', image_url: { url: input.screenshotDataUrl } },
         ],
       },
@@ -185,13 +195,16 @@ const OFFLINE_MIN_FIELDS = 3
  * True when a free offline DOM detection is too thin to rely on, in which
  * case the caller should fall through to the vision-LLM scan.
  *
- * Offline field detection on modern (React/Vue) ATS forms often captures only
- * a couple of inputs because labels live outside <label>, so a sparse result
- * means the vision model should read the rendered page for the full field set
- * (and the job title/company the offline pass can't recover).
+ * Only prefillable text-ish fields (input/textarea/select) count — a page
+ * whose only "fields" are checkboxes (cookie-consent dialogs!) or file inputs
+ * has recovered nothing a scan can use, so it must not win over the vision
+ * tier.
  */
 export function isOfflineScanSparse(scan: PageScan | null | undefined): boolean {
   if (!scan || !scan.fields?.length) return true
   if (!scan.jobDescription) return true
-  return scan.fields.length < OFFLINE_MIN_FIELDS
+  const textish = scan.fields.filter(
+    (f) => f.kind === 'input' || f.kind === 'textarea' || f.kind === 'select',
+  )
+  return textish.length < OFFLINE_MIN_FIELDS
 }

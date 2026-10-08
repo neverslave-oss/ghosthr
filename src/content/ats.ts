@@ -45,19 +45,21 @@ export function detectProvider(url: string, bodyText: string): 'workable' | 'gen
 
 /**
  * Extract the job-description block from a page. In Workable-style flows the
- * description sits above the form. Pure heuristic: take the largest text block
- * before the first form field.
+ * description sits above the form. Returns the FULL pre-form text (joined
+ * paragraphs), not just one paragraph — multi-paragraph adverts (About /
+ * Role / Requirements / Benefits sections) must survive intact or the verdict
+ * scores a fraction of the job.
  */
+const MAX_DESCRIPTION_CHARS = 20000
+
 export function extractJobDescription(
   bodyText: string,
   firstFieldIndex: number,
 ): string {
   const text = bodyText
   const slice = firstFieldIndex > 0 ? text.slice(0, firstFieldIndex) : text
-  // crude: return the longest paragraph-ish run
   const paragraphs = slice.split(/\n+/).map(normalizeText).filter((p) => p.length > 0)
-  paragraphs.sort((a, b) => b.length - a.length)
-  return paragraphs[0] ?? ''
+  return paragraphs.join('\n').slice(0, MAX_DESCRIPTION_CHARS)
 }
 
 /**

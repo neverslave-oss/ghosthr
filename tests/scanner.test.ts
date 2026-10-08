@@ -27,6 +27,14 @@ describe('isOfflineScanSparse', () => {
     expect(isOfflineScanSparse(mk(6, ''))).toBe(true)
   })
 
+  it('is sparse when the only fields are checkboxes (cookie-consent dialogs)', () => {
+    const scan: PageScan = {
+      jobTitle: '', company: '', jobDescription: 'Apply for this job',
+      fields: Array.from({ length: 4 }, (_, i) => ({ label: `consent ${i}`, kind: 'checkbox' as const, required: false })),
+    }
+    expect(isOfflineScanSparse(scan)).toBe(true)
+  })
+
   it('is NOT sparse with a solid field set + description', () => {
     expect(isOfflineScanSparse(mk(6))).toBe(false)
     expect(isOfflineScanSparse(localDetectedToScan({

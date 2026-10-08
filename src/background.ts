@@ -93,11 +93,15 @@ async function handleMessage(msg: any): Promise<any> {
       const tab = await getActiveWebTab()
       let scan: PageScan | null = null
       let offline = false
+      let pageText = ''
       if (tab?.id) {
         try {
           const det = await chrome.tabs.sendMessage(tab.id, { type: 'GHOSTHR_DETECT' })
           const form: DetectedForm | null = det?.form
           if (form) {
+            // Keep the DOM text for the vision tier — inner-scroll pages (e.g.
+            // elevenlabs) screenshot only partially; the DOM has everything.
+            pageText = form.descriptionText || ''
             const localScan = localDetectedToScan(form as any)
             // Only trust the free offline pass when it actually recovered a
             // sensible field set — modern (React/Vue) ATS forms often yield
@@ -127,7 +131,7 @@ async function handleMessage(msg: any): Promise<any> {
           // popup so it can route the screenshot through the shell's bridge.
           return { ok: false, captureUnavailable: true, error: 'Screen capture unavailable here.' }
         }
-        scan = await scanPage({ settings, screenshotDataUrl: dataUrl })
+        scan = await scanPage({ settings, screenshotDataUrl: dataUrl, pageText })
       }
 
       if (!scan.jobDescription && !scan.fields.length) {
@@ -175,7 +179,17 @@ async function handleMessage(msg: any): Promise<any> {
           return { ok: true, scan: cached, settings, cached: true, offline: false }
         }
       }
-      const scan = await scanPage({ settings, screenshotDataUrl: msg.imageDataUrl })
+      // Pull the DOM text from the page so inner-scroll content the screenshot
+      // can't show still reaches the model.
+      let pageText = ''
+      try {
+        const tab = await getActiveWebTab()
+        if (tab?.id) {
+          const det = await chrome.tabs.sendMessage(tab.id, { type: 'GHOSTHR_DETECT' })
+          pageText = det?.form?.descriptionText || ''
+        }
+      } catch { /* text is best-effort */ }
+      const scan = await scanPage({ settings, screenshotDataUrl: msg.imageDataUrl, pageText })
       if (!scan.jobDescription && !scan.fields.length) {
         return { ok: true, empty: true, scan, offline: false }
       }
@@ -322,10 +336,107 @@ async function getActiveWebTab(): Promise<chrome.tabs.Tab | null> {
   return null
 }
 
-/** Capture the visible (or full-page) active tab as a PNG data URL. */
+/** Max CSS px height for a full-page capture (GPU texture limit + model legibility). */
+const MAX_CAPTURE_HEIGHT = 10000
+
+// Sites with a nested scroll container (content size == viewport) defeat
+// captureBeyondViewport; expand every vertical scroller (multi-pass: expanding
+// one reveals overflow on its fixed-height ancestors), restore after.
+const EXPAND_SCROLLERS = `(() => {
+  const mods = []
+  const expand = (el) => {
+    if (!el || mods.some((m) => m[0] === el)) return false
+    mods.push([el, el.getAttribute('style')])
+    el.style.setProperty('height', 'auto', 'important')
+    el.style.setProperty('max-height', 'none', 'important')
+    el.style.setProperty('overflow', 'visible', 'important')
+    return true
+  }
+  for (let pass = 0; pass < 6; pass++) {
+    let changed = false
+    for (const el of document.querySelectorAll('*')) {
+      if (el.scrollHeight > el.clientHeight + 8) {
+        const oy = getComputedStyle(el).overflowY
+        if (oy === 'auto' || oy === 'scroll' || oy === 'hidden' || oy === 'clip') changed = expand(el) || changed
+      }
+    }
+    if (document.documentElement.scrollHeight > document.documentElement.clientHeight + 8) {
+      changed = expand(document.documentElement) || changed
+      changed = expand(document.body) || changed
+    }
+    if (!changed) break
+  }
+  window.__ghosthrRestoreScroll = () => {
+    for (const [el, css] of mods) { if (css === null) el.removeAttribute('style'); else el.setAttribute('style', css) }
+    delete window.__ghosthrRestoreScroll
+  }
+  // Fixed-height shells (100dvh) never grow document.scrollHeight — report the
+  // real painted bottom across the expanded containers instead.
+  let maxBottom = document.documentElement.scrollHeight
+  for (const [el] of mods) {
+    try {
+      const r = el.getBoundingClientRect()
+      maxBottom = Math.max(maxBottom, r.top + (window.scrollY || 0) + el.scrollHeight)
+    } catch (e) {}
+  }
+  return Math.ceil(maxBottom)
+})()`
+const RESTORE_SCROLLERS = `window.__ghosthrRestoreScroll && window.__ghosthrRestoreScroll()`
+
+/**
+ * DevTools-style "Capture full size screenshot": CDP Page.captureScreenshot
+ * with captureBeyondViewport, so below-the-fold description + form fields
+ * reach the vision scan instead of just the first viewport.
+ */
+async function captureFullPage(tabId: number): Promise<string> {
+  const target = { tabId }
+  await chrome.debugger.attach(target, '1.3')
+  try {
+    let expandedH = 0
+    try {
+      const ev: any = await chrome.debugger.sendCommand(target, 'Runtime.evaluate', {
+        expression: EXPAND_SCROLLERS,
+        returnByValue: true,
+      })
+      expandedH = Number(ev?.result?.value) || 0
+    } catch { /* best-effort */ }
+    const metrics: any = await chrome.debugger.sendCommand(target, 'Page.getLayoutMetrics')
+    const size = metrics?.cssContentSize ?? metrics?.contentSize
+    const docH = size ? Math.ceil(size.height) : 0
+    const fullH = Math.max(docH, expandedH)
+    const clip = size
+      ? {
+          x: 0,
+          y: 0,
+          width: Math.ceil(size.width),
+          height: Math.min(fullH, MAX_CAPTURE_HEIGHT),
+          scale: 1,
+        }
+      : undefined
+    const shot: any = await chrome.debugger.sendCommand(target, 'Page.captureScreenshot', {
+      format: 'png',
+      captureBeyondViewport: true,
+      ...(clip ? { clip } : {}),
+    })
+    if (!shot?.data) throw new Error('empty full-page screenshot')
+    return 'data:image/png;base64,' + shot.data
+  } finally {
+    try {
+      await chrome.debugger.sendCommand(target, 'Runtime.evaluate', { expression: RESTORE_SCROLLERS })
+    } catch { /* page may have navigated */ }
+    try { await chrome.debugger.detach(target) } catch { /* already detached */ }
+  }
+}
+
+/** Capture the active tab as a PNG data URL — full page, viewport fallback. */
 async function captureActiveTab(): Promise<string> {
   const tab = await getActiveWebTab()
   if (!tab?.id) throw new Error('No active tab')
+  try {
+    return await captureFullPage(tab.id)
+  } catch {
+    // Debugger unavailable (DevTools attached, restricted page) -> visible viewport.
+  }
   const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId ?? chrome.windows.WINDOW_ID_CURRENT, {
     format: 'png',
   })

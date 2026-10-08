@@ -17,6 +17,53 @@
 const { WebContentsView, session, ipcMain } = require('electron')
 
 const HOMEPAGE = 'https://www.google.com'
+// Max CSS px height for a full-page capture (GPU texture limit + model legibility).
+const MAX_CAPTURE_HEIGHT = 10000
+
+// Some sites (e.g. elevenlabs careers) scroll inside a nested container, so
+// the document content size equals the viewport and captureBeyondViewport
+// still returns one screen. Expand every vertical scroller (multi-pass:
+// expanding one reveals overflow on its fixed-height ancestors) and restore.
+const EXPAND_SCROLLERS = `(() => {
+  const mods = []
+  const expand = (el) => {
+    if (!el || mods.some((m) => m[0] === el)) return false
+    mods.push([el, el.getAttribute('style')])
+    el.style.setProperty('height', 'auto', 'important')
+    el.style.setProperty('max-height', 'none', 'important')
+    el.style.setProperty('overflow', 'visible', 'important')
+    return true
+  }
+  for (let pass = 0; pass < 6; pass++) {
+    let changed = false
+    for (const el of document.querySelectorAll('*')) {
+      if (el.scrollHeight > el.clientHeight + 8) {
+        const oy = getComputedStyle(el).overflowY
+        if (oy === 'auto' || oy === 'scroll' || oy === 'hidden' || oy === 'clip') changed = expand(el) || changed
+      }
+    }
+    if (document.documentElement.scrollHeight > document.documentElement.clientHeight + 8) {
+      changed = expand(document.documentElement) || changed
+      changed = expand(document.body) || changed
+    }
+    if (!changed) break
+  }
+  window.__ghosthrRestoreScroll = () => {
+    for (const [el, css] of mods) { if (css === null) el.removeAttribute('style'); else el.setAttribute('style', css) }
+    delete window.__ghosthrRestoreScroll
+  }
+  // Fixed-height shells (100dvh) never grow document.scrollHeight — report the
+  // real painted bottom across the expanded containers instead.
+  let maxBottom = document.documentElement.scrollHeight
+  for (const [el] of mods) {
+    try {
+      const r = el.getBoundingClientRect()
+      maxBottom = Math.max(maxBottom, r.top + (window.scrollY || 0) + el.scrollHeight)
+    } catch (e) {}
+  }
+  return Math.ceil(maxBottom)
+})()`
+const RESTORE_SCROLLERS = `window.__ghosthrRestoreScroll && window.__ghosthrRestoreScroll()`
 
 function normalizeUrl(input) {
   let u = String(input || '').trim()
@@ -85,6 +132,12 @@ class BrowserController {
     try { this.view.setBorderRadius(14) } catch { /* older Electron */ }
 
     const wc = this.view.webContents
+    // Single-window browser: target=_blank / window.open navigates in place
+    // instead of spawning a detached BrowserWindow.
+    wc.setWindowOpenHandler(({ url }) => {
+      if (/^https?:/i.test(url)) this.navigate(url)
+      return { action: 'deny' }
+    })
     wc.on('did-navigate', (_e, url) => {
       this.currentUrl = url
       this._push('browser:url-changed', { url })
@@ -122,6 +175,12 @@ class BrowserController {
     })
     win.contentView.addChildView(this.panel)
     try { this.panel.setBorderRadius(14) } catch { /* older Electron */ }
+    // Links from the extension panel (e.g. target=_blank) open in the
+    // embedded browser view, like Chrome opening a tab from its side panel.
+    this.panel.webContents.setWindowOpenHandler(({ url }) => {
+      if (/^https?:/i.test(url)) this.navigate(url)
+      return { action: 'deny' }
+    })
     // Hidden until the renderer reports real bounds for the panel region.
     this.panel.setBounds({ x: 0, y: 0, width: 0, height: 0 })
     this.panel.webContents.loadURL(url).catch((e) => {
@@ -190,8 +249,55 @@ class BrowserController {
     }
   }
 
+  /**
+   * DevTools-style full-size screenshot via CDP (Page.captureScreenshot with
+   * captureBeyondViewport) — includes everything below the fold.
+   */
+  async captureFullPage() {
+    const wc = this.view?.webContents
+    if (!wc) throw new Error('no browser view')
+    const dbg = wc.debugger
+    let attached = false
+    if (!dbg.isAttached()) { dbg.attach('1.3'); attached = true }
+    try {
+      let expandedH = 0
+      try {
+        const ev = await dbg.sendCommand('Runtime.evaluate', { expression: EXPAND_SCROLLERS, returnByValue: true })
+        expandedH = Number(ev?.result?.value) || 0
+      } catch { /* best-effort */ }
+      const metrics = await dbg.sendCommand('Page.getLayoutMetrics')
+      const size = metrics?.cssContentSize ?? metrics?.contentSize
+      const docH = size ? Math.ceil(size.height) : 0
+      const fullH = Math.max(docH, expandedH)
+      const clip = size
+        ? {
+            x: 0,
+            y: 0,
+            width: Math.ceil(size.width),
+            height: Math.min(fullH, MAX_CAPTURE_HEIGHT),
+            scale: 1,
+          }
+        : undefined
+      const shot = await dbg.sendCommand('Page.captureScreenshot', {
+        format: 'png',
+        captureBeyondViewport: true,
+        ...(clip ? { clip } : {}),
+      })
+      if (!shot || !shot.data) throw new Error('empty full-page screenshot')
+      return 'data:image/png;base64,' + shot.data
+    } finally {
+      try { await dbg.sendCommand('Runtime.evaluate', { expression: RESTORE_SCROLLERS }) } catch { /* page may have navigated */ }
+      if (attached) { try { dbg.detach() } catch { /* already detached */ } }
+    }
+  }
+
   async capturePage() {
     if (!this.view) return { ok: false, error: 'no browser view' }
+    try {
+      return { ok: true, dataUrl: await this.captureFullPage() }
+    } catch {
+      // CDP unavailable (e.g. DevTools attached) -> visible viewport fallback.
+    }
     try {
       const image = await this.view.webContents.capturePage()
       if (!image || image.isEmpty()) {
